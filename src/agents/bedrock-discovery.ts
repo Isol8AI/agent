@@ -3,7 +3,36 @@ import {
   ListFoundationModelsCommand,
   type ListFoundationModelsCommandOutput,
 } from "@aws-sdk/client-bedrock";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import { ProxyAgent } from "proxy-agent";
 import type { BedrockDiscoveryConfig, ModelDefinitionConfig } from "../config/types.js";
+
+/**
+ * Create a BedrockClient that routes through an HTTP proxy when proxy env vars are set.
+ * Same pattern as pi-ai's amazon-bedrock provider (amazon-bedrock.js lines 36-52).
+ *
+ * Inside a Nitro Enclave there's no DNS or direct internet — all traffic must go
+ * through the vsock HTTP CONNECT proxy. The default BedrockClient doesn't respect
+ * HTTP_PROXY env vars, so we configure NodeHttpHandler with proxy-agent explicitly.
+ */
+function createProxyAwareBedrockClient(region: string): BedrockClient {
+  if (
+    process.env.HTTP_PROXY ||
+    process.env.HTTPS_PROXY ||
+    process.env.http_proxy ||
+    process.env.https_proxy
+  ) {
+    const agent = new ProxyAgent();
+    return new BedrockClient({
+      region,
+      requestHandler: new NodeHttpHandler({
+        httpAgent: agent,
+        httpsAgent: agent,
+      }),
+    });
+  }
+  return new BedrockClient({ region });
+}
 
 const DEFAULT_REFRESH_INTERVAL_SECONDS = 3600;
 const DEFAULT_CONTEXT_WINDOW = 32000;
@@ -174,7 +203,7 @@ export async function discoverBedrockModels(params: {
     }
   }
 
-  const clientFactory = params.clientFactory ?? ((region: string) => new BedrockClient({ region }));
+  const clientFactory = params.clientFactory ?? createProxyAwareBedrockClient;
   const client = clientFactory(params.region);
 
   const discoveryPromise = (async () => {
