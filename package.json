@@ -179,6 +179,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "file-type": "^21.3.0",
+    "global-agent": "^4.1.2",
     "grammy": "^1.39.3",
     "hono": "4.11.7",
     "jiti": "^2.6.1",
