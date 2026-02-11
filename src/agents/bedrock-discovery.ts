@@ -1,6 +1,7 @@
 import {
   BedrockClient,
   ListFoundationModelsCommand,
+  ListInferenceProfilesCommand,
   type ListFoundationModelsCommandOutput,
 } from "@aws-sdk/client-bedrock";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
@@ -152,8 +153,11 @@ function shouldIncludeSummary(summary: BedrockModelSummary, filter: string[]): b
 function toModelDefinition(
   summary: BedrockModelSummary,
   defaults: { contextWindow: number; maxTokens: number },
+  inferenceProfileId?: string,
 ): ModelDefinitionConfig {
-  const id = summary.modelId?.trim() ?? "";
+  const baseId = summary.modelId?.trim() ?? "";
+  // Use inference profile ID for invocation if available
+  const id = inferenceProfileId ?? baseId;
   return {
     id,
     name: summary.modelName?.trim() || id,
@@ -163,6 +167,40 @@ function toModelDefinition(
     contextWindow: defaults.contextWindow,
     maxTokens: defaults.maxTokens,
   };
+}
+
+/**
+ * Build a mapping from base model ID to inference profile ID.
+ * Some Bedrock models require inference profile IDs (e.g. us.anthropic.claude-...)
+ * for invocation and don't support on-demand throughput with base model IDs.
+ */
+async function buildInferenceProfileMap(client: BedrockClient): Promise<Map<string, string>> {
+  const mapping = new Map<string, string>();
+  try {
+    let nextToken: string | undefined;
+    do {
+      const response = await client.send(new ListInferenceProfilesCommand({ nextToken }));
+      for (const profile of response.inferenceProfileSummaries ?? []) {
+        const profileId = profile.inferenceProfileId?.trim();
+        if (!profileId) continue;
+        for (const modelRef of profile.models ?? []) {
+          const arn = modelRef.modelArn ?? "";
+          // ARN: arn:aws:bedrock:region::foundation-model/base-model-id
+          const idx = arn.indexOf("foundation-model/");
+          if (idx >= 0) {
+            const baseId = arn.slice(idx + "foundation-model/".length).trim();
+            if (baseId) {
+              mapping.set(baseId, profileId);
+            }
+          }
+        }
+      }
+      nextToken = response.nextToken;
+    } while (nextToken);
+  } catch {
+    // Non-fatal: if ListInferenceProfiles fails, we'll use base IDs
+  }
+  return mapping;
 }
 
 export function resetBedrockDiscoveryCacheForTest(): void {
@@ -206,18 +244,35 @@ export async function discoverBedrockModels(params: {
   const client = clientFactory(params.region);
 
   const discoveryPromise = (async () => {
-    const response = await client.send(new ListFoundationModelsCommand({}));
+    const [response, profileMap] = await Promise.all([
+      client.send(new ListFoundationModelsCommand({})),
+      buildInferenceProfileMap(client),
+    ]);
     const discovered: ModelDefinitionConfig[] = [];
+    const registeredIds = new Set<string>();
     for (const summary of response.modelSummaries ?? []) {
       if (!shouldIncludeSummary(summary, providerFilter)) {
         continue;
       }
-      discovered.push(
-        toModelDefinition(summary, {
-          contextWindow: defaultContextWindow,
-          maxTokens: defaultMaxTokens,
-        }),
+      const baseId = summary.modelId?.trim() ?? "";
+      const profileId = profileMap.get(baseId);
+      const def = toModelDefinition(
+        summary,
+        { contextWindow: defaultContextWindow, maxTokens: defaultMaxTokens },
+        profileId,
       );
+      discovered.push(def);
+      registeredIds.add(def.id);
+      // Also register the base ID so ModelRegistry.find() works with either
+      if (profileId && !registeredIds.has(baseId)) {
+        discovered.push(
+          toModelDefinition(summary, {
+            contextWindow: defaultContextWindow,
+            maxTokens: defaultMaxTokens,
+          }),
+        );
+        registeredIds.add(baseId);
+      }
     }
     return discovered.toSorted((a, b) => a.name.localeCompare(b.name));
   })();
