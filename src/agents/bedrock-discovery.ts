@@ -131,8 +131,17 @@ function matchesProviderFilter(summary: BedrockModelSummary, filter: string[]): 
   return filter.includes(normalized);
 }
 
+function isThroughputVariant(modelId: string): boolean {
+  // Provisioned throughput variants like "model:0:48k" have 3+ colon segments.
+  // They require purchased provisioned throughput and 404 on on-demand invocation.
+  return modelId.split(":").length > 2;
+}
+
 function shouldIncludeSummary(summary: BedrockModelSummary, filter: string[]): boolean {
   if (!summary.modelId?.trim()) {
+    return false;
+  }
+  if (isThroughputVariant(summary.modelId.trim())) {
     return false;
   }
   if (!matchesProviderFilter(summary, filter)) {
