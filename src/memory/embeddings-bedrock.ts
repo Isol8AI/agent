@@ -111,7 +111,10 @@ export async function createBedrockEmbeddingProvider(
     );
   }
 
-  const token = resolveBedrockBearerToken(options);
+  // Validate token exists at startup (fail fast), but don't capture the value —
+  // it will be re-read at request time so `aws sso login` refreshes are picked up
+  // without restarting the process.
+  resolveBedrockBearerToken(options);
 
   const remoteBaseUrl = options.remote?.baseUrl?.trim();
   const region = remoteBaseUrl ? null : resolveBedrockRegion(options);
@@ -120,23 +123,23 @@ export async function createBedrockEmbeddingProvider(
   const providerCfg = options.config.models?.providers?.["amazon-bedrock"] as
     | { headers?: Record<string, string> }
     | undefined;
-  const headers: Record<string, string> = {
+  const staticHeaders: Record<string, string> = {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
     ...providerCfg?.headers,
     ...options.remote?.headers,
   };
 
-  const client: BedrockEmbeddingClient = { baseUrl, modelId, headers, region };
+  const client: BedrockEmbeddingClient = { baseUrl, modelId, headers: staticHeaders, region };
 
   const invokeUrl = `${baseUrl}/model/${encodeURIComponent(modelId)}/invoke`;
   const { defaultDimension, buildRequest, parseResponse } = modelConfig;
 
   const embedSingle = async (text: string): Promise<number[]> => {
     const body = buildRequest(text, defaultDimension);
+    const liveToken = resolveBedrockBearerToken(options);
     const res = await fetch(invokeUrl, {
       method: "POST",
-      headers,
+      headers: { ...staticHeaders, Authorization: `Bearer ${liveToken}` },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
