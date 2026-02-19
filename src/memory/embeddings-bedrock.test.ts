@@ -6,11 +6,12 @@ import {
 } from "./embeddings-bedrock.js";
 
 const createFetchMock = (embedding = [0.1, 0.2, 0.3]) =>
-  vi.fn(async () =>
-    new Response(
-      JSON.stringify({ embeddings: [{ embeddingType: "TEXT", embedding }] }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ),
+  vi.fn(
+    async () =>
+      new Response(JSON.stringify({ embeddings: [{ embeddingType: "TEXT", embedding }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
   );
 
 afterEach(() => {
