@@ -18,6 +18,7 @@ import {
   createEmbeddingProvider,
   type BedrockEmbeddingClient,
   type EmbeddingProvider,
+  type EmbeddingProviderId,
   type GeminiEmbeddingClient,
   type OpenAiEmbeddingClient,
   type VoyageEmbeddingClient,
@@ -89,7 +90,7 @@ export abstract class MemoryManagerSyncOps {
   protected abstract readonly workspaceDir: string;
   protected abstract readonly settings: ResolvedMemorySearchConfig;
   protected provider: EmbeddingProvider | null = null;
-  protected fallbackFrom?: "openai" | "local" | "gemini" | "voyage" | "bedrock";
+  protected fallbackFrom?: EmbeddingProviderId;
   protected openAi?: OpenAiEmbeddingClient;
   protected gemini?: GeminiEmbeddingClient;
   protected voyage?: VoyageEmbeddingClient;

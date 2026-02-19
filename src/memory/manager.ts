@@ -11,6 +11,8 @@ import {
   createEmbeddingProvider,
   type BedrockEmbeddingClient,
   type EmbeddingProvider,
+  type EmbeddingProviderRequest,
+  type EmbeddingProviderId,
   type EmbeddingProviderResult,
   type GeminiEmbeddingClient,
   type OpenAiEmbeddingClient,
@@ -47,8 +49,8 @@ export class MemoryIndexManager extends MemoryManagerEmbeddingOps implements Mem
   protected readonly workspaceDir: string;
   protected readonly settings: ResolvedMemorySearchConfig;
   protected provider: EmbeddingProvider | null;
-  private readonly requestedProvider: "openai" | "local" | "gemini" | "voyage" | "bedrock" | "auto";
-  protected fallbackFrom?: "openai" | "local" | "gemini" | "voyage" | "bedrock";
+  private readonly requestedProvider: EmbeddingProviderRequest;
+  protected fallbackFrom?: EmbeddingProviderId;
   protected fallbackReason?: string;
   private readonly providerUnavailableReason?: string;
   protected openAi?: OpenAiEmbeddingClient;

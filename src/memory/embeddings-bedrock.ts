@@ -60,17 +60,25 @@ export type BedrockEmbeddingClient = {
 
 export function normalizeBedrockModel(model: string): string {
   const trimmed = model.trim();
-  if (!trimmed) return DEFAULT_BEDROCK_EMBEDDING_MODEL;
-  if (trimmed.startsWith("bedrock/")) return trimmed.slice("bedrock/".length);
+  if (!trimmed) {
+    return DEFAULT_BEDROCK_EMBEDDING_MODEL;
+  }
+  if (trimmed.startsWith("bedrock/")) {
+    return trimmed.slice("bedrock/".length);
+  }
   return trimmed;
 }
 
 function resolveBedrockBearerToken(options: EmbeddingProviderOptions): string {
   const remoteKey = options.remote?.apiKey?.trim();
-  if (remoteKey) return remoteKey;
+  if (remoteKey) {
+    return remoteKey;
+  }
 
   const envToken = process.env.AWS_BEARER_TOKEN_BEDROCK?.trim();
-  if (envToken) return envToken;
+  if (envToken) {
+    return envToken;
+  }
 
   throw new Error(
     [
