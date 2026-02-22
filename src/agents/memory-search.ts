@@ -9,7 +9,7 @@ export type ResolvedMemorySearchConfig = {
   enabled: boolean;
   sources: Array<"memory" | "sessions">;
   extraPaths: string[];
-  provider: "openai" | "local" | "gemini" | "voyage" | "auto";
+  provider: "openai" | "local" | "gemini" | "voyage" | "bedrock" | "auto";
   remote?: {
     baseUrl?: string;
     apiKey?: string;
@@ -25,7 +25,7 @@ export type ResolvedMemorySearchConfig = {
   experimental: {
     sessionMemory: boolean;
   };
-  fallback: "openai" | "gemini" | "local" | "voyage" | "none";
+  fallback: "openai" | "gemini" | "local" | "voyage" | "bedrock" | "none";
   model: string;
   local: {
     modelPath?: string;
@@ -153,6 +153,7 @@ function mergeConfig(
     provider === "openai" ||
     provider === "gemini" ||
     provider === "voyage" ||
+    provider === "bedrock" ||
     provider === "auto";
   const batch = {
     enabled: overrideRemote?.batch?.enabled ?? defaultRemote?.batch?.enabled ?? false,
@@ -175,6 +176,7 @@ function mergeConfig(
       }
     : undefined;
   const fallback = overrides?.fallback ?? defaults?.fallback ?? "none";
+  const DEFAULT_BEDROCK_MODEL = "amazon.nova-2-multimodal-embeddings-v1:0";
   const modelDefault =
     provider === "gemini"
       ? DEFAULT_GEMINI_MODEL
@@ -182,7 +184,9 @@ function mergeConfig(
         ? DEFAULT_OPENAI_MODEL
         : provider === "voyage"
           ? DEFAULT_VOYAGE_MODEL
-          : undefined;
+          : provider === "bedrock"
+            ? DEFAULT_BEDROCK_MODEL
+            : undefined;
   const model = overrides?.model ?? defaults?.model ?? modelDefault ?? "";
   const local = {
     modelPath: overrides?.local?.modelPath ?? defaults?.local?.modelPath,
