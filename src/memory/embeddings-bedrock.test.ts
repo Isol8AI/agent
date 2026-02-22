@@ -5,18 +5,41 @@ import {
   normalizeBedrockModel,
 } from "./embeddings-bedrock.js";
 
-const createFetchMock = (embedding = [0.1, 0.2, 0.3]) =>
-  vi.fn<(input: string | Request, init?: RequestInit) => Promise<Response>>(
-    async () =>
-      new Response(JSON.stringify({ embeddings: [{ embeddingType: "TEXT", embedding }] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-  );
+// vi.hoisted runs before vi.mock hoisting, so these are available in the factory
+const { mockSend, MockBedrockRuntimeClient, MockInvokeModelCommand } = vi.hoisted(() => {
+  const mockSend = vi.fn();
+  // Must be a class or function (not arrow) to support `new`
+  class MockBedrockRuntimeClient {
+    send = mockSend;
+  }
+  class MockInvokeModelCommand {
+    input: unknown;
+    constructor(input: unknown) {
+      this.input = input;
+    }
+  }
+  return { mockSend, MockBedrockRuntimeClient, MockInvokeModelCommand };
+});
+
+vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
+  BedrockRuntimeClient: MockBedrockRuntimeClient,
+  InvokeModelCommand: MockInvokeModelCommand,
+}));
+
+// Mock proxy deps (not needed in tests)
+vi.mock("@smithy/node-http-handler", () => ({ NodeHttpHandler: vi.fn() }));
+vi.mock("https-proxy-agent", () => ({ HttpsProxyAgent: vi.fn() }));
+
+function mockBedrockResponse(embedding = [0.1, 0.2, 0.3]) {
+  mockSend.mockResolvedValue({
+    body: new TextEncoder().encode(
+      JSON.stringify({ embeddings: [{ embeddingType: "TEXT", embedding }] }),
+    ),
+  });
+}
 
 afterEach(() => {
-  vi.resetAllMocks();
-  vi.unstubAllGlobals();
+  vi.clearAllMocks();
   vi.unstubAllEnvs();
 });
 
@@ -40,108 +63,41 @@ describe("normalizeBedrockModel", () => {
 });
 
 describe("createBedrockEmbeddingProvider", () => {
-  it("builds correct invoke URL with default region", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
-    const fetchMock = createFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
+  it("uses default region when AWS_REGION not set", async () => {
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+    mockBedrockResponse();
 
-    const { provider } = await createBedrockEmbeddingProvider({
+    const { client } = await createBedrockEmbeddingProvider({
       config: {} as never,
       provider: "bedrock",
       model: "",
       fallback: "none",
     });
 
-    await provider.embedQuery("hello");
-
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(
-      `https://bedrock-runtime.us-east-1.amazonaws.com/model/${encodeURIComponent(DEFAULT_BEDROCK_EMBEDDING_MODEL)}/invoke`,
-    );
+    expect(client.region).toBe("us-east-1");
   });
 
   it("uses AWS_REGION env var for region", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
     vi.stubEnv("AWS_REGION", "ap-southeast-1");
-    const fetchMock = createFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
+    mockBedrockResponse();
 
-    const { provider } = await createBedrockEmbeddingProvider({
+    const { client } = await createBedrockEmbeddingProvider({
       config: {} as never,
       provider: "bedrock",
       model: "",
       fallback: "none",
     });
 
-    await provider.embedQuery("hello");
-
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("bedrock-runtime.ap-southeast-1.amazonaws.com");
+    expect(client.region).toBe("ap-southeast-1");
   });
 
-  it("sets Authorization Bearer header from env token", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "my-bearer-token");
-    const fetchMock = createFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { provider } = await createBedrockEmbeddingProvider({
-      config: {} as never,
-      provider: "bedrock",
-      model: "",
-      fallback: "none",
-    });
-
-    await provider.embedQuery("hello");
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const headers = init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer my-bearer-token");
-    expect(headers["Content-Type"]).toBe("application/json");
-  });
-
-  it("prefers remote.apiKey over env token", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "env-token");
-    const fetchMock = createFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { provider } = await createBedrockEmbeddingProvider({
-      config: {} as never,
-      provider: "bedrock",
-      model: "",
-      fallback: "none",
-      remote: { apiKey: "override-token" },
-    });
-
-    await provider.embedQuery("hello");
-
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const headers = init.headers as Record<string, string>;
-    expect(headers.Authorization).toBe("Bearer override-token");
-  });
-
-  it("uses remote.baseUrl when provided", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
-    const fetchMock = createFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { provider } = await createBedrockEmbeddingProvider({
-      config: {} as never,
-      provider: "bedrock",
-      model: "",
-      fallback: "none",
-      remote: { baseUrl: "https://proxy.example.com" },
-    });
-
-    await provider.embedQuery("hello");
-
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("https://proxy.example.com/model/");
-  });
-
-  it("sends correct Nova 2 request body", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
-    const fetchMock = createFetchMock();
-    vi.stubGlobal("fetch", fetchMock);
+  it("sends correct Nova 2 request body via InvokeModelCommand", async () => {
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+    mockBedrockResponse();
 
     const { provider } = await createBedrockEmbeddingProvider({
       config: {} as never,
@@ -152,25 +108,26 @@ describe("createBedrockEmbeddingProvider", () => {
 
     await provider.embedQuery("test input");
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(init.body as string);
+    // Verify the command passed to client.send()
+    const command = mockSend.mock.calls[0][0] as InstanceType<typeof MockInvokeModelCommand>;
+    const input = command.input as { modelId: string; body: string };
+    expect(input.modelId).toBe(DEFAULT_BEDROCK_EMBEDDING_MODEL);
+    const body = JSON.parse(input.body);
     expect(body).toMatchObject({
       schemaVersion: "nova-multimodal-embed-v1",
       taskType: "SINGLE_EMBEDDING",
       singleEmbeddingParams: {
         embeddingPurpose: "GENERIC_INDEX",
         embeddingDimension: 1024,
-        text: {
-          truncationMode: "END",
-          value: "test input",
-        },
+        text: { truncationMode: "END", value: "test input" },
       },
     });
   });
 
   it("parses Nova 2 response correctly", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
-    vi.stubGlobal("fetch", createFetchMock([0.1, 0.2, 0.3]));
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+    mockBedrockResponse([0.1, 0.2, 0.3]);
 
     const { provider } = await createBedrockEmbeddingProvider({
       config: {} as never,
@@ -184,9 +141,9 @@ describe("createBedrockEmbeddingProvider", () => {
   });
 
   it("embedBatch calls invoke once per text", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
-    const fetchMock = createFetchMock([0.5, 0.6]);
-    vi.stubGlobal("fetch", fetchMock);
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+    mockBedrockResponse([0.5, 0.6]);
 
     const { provider } = await createBedrockEmbeddingProvider({
       config: {} as never,
@@ -196,12 +153,15 @@ describe("createBedrockEmbeddingProvider", () => {
     });
 
     const results = await provider.embedBatch(["a", "b", "c"]);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(mockSend).toHaveBeenCalledTimes(3);
     expect(results).toHaveLength(3);
   });
 
-  it("throws helpful error when AWS_BEARER_TOKEN_BEDROCK is missing", async () => {
+  it("throws when no AWS credentials are available", async () => {
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
     delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+    delete process.env.AWS_PROFILE;
 
     await expect(
       createBedrockEmbeddingProvider({
@@ -213,8 +173,25 @@ describe("createBedrockEmbeddingProvider", () => {
     ).rejects.toThrow('No API key found for provider "bedrock"');
   });
 
+  it("accepts AWS_BEARER_TOKEN_BEDROCK as valid credentials", async () => {
+    delete process.env.AWS_ACCESS_KEY_ID;
+    delete process.env.AWS_SECRET_ACCESS_KEY;
+    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "sso-token");
+    mockBedrockResponse();
+
+    const { provider } = await createBedrockEmbeddingProvider({
+      config: {} as never,
+      provider: "bedrock",
+      model: "",
+      fallback: "none",
+    });
+
+    expect(provider.id).toBe("bedrock");
+  });
+
   it("throws for unsupported model", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
 
     await expect(
       createBedrockEmbeddingProvider({
@@ -227,8 +204,9 @@ describe("createBedrockEmbeddingProvider", () => {
   });
 
   it("exposes provider id and model", async () => {
-    vi.stubEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token");
-    vi.stubGlobal("fetch", createFetchMock());
+    vi.stubEnv("AWS_ACCESS_KEY_ID", "test-key");
+    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "test-secret");
+    mockBedrockResponse();
 
     const { provider, client } = await createBedrockEmbeddingProvider({
       config: {} as never,

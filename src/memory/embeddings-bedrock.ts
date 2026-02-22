@@ -1,3 +1,6 @@
+import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import { HttpsProxyAgent } from "https-proxy-agent";
 import type { EmbeddingProvider, EmbeddingProviderOptions } from "./embeddings.js";
 
 // ---------------------------------------------------------------------------
@@ -48,10 +51,8 @@ export const DEFAULT_BEDROCK_EMBEDDING_MODEL = "amazon.nova-2-multimodal-embeddi
 export const DEFAULT_BEDROCK_REGION = "us-east-1";
 
 export type BedrockEmbeddingClient = {
-  baseUrl: string;
   modelId: string;
-  headers: Record<string, string>;
-  region: string | null;
+  region: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -69,27 +70,6 @@ export function normalizeBedrockModel(model: string): string {
   return trimmed;
 }
 
-function resolveBedrockBearerToken(options: EmbeddingProviderOptions): string {
-  const remoteKey = options.remote?.apiKey?.trim();
-  if (remoteKey) {
-    return remoteKey;
-  }
-
-  const envToken = process.env.AWS_BEARER_TOKEN_BEDROCK?.trim();
-  if (envToken) {
-    return envToken;
-  }
-
-  throw new Error(
-    [
-      'No API key found for provider "bedrock".',
-      "Set AWS_BEARER_TOKEN_BEDROCK in your environment.",
-      "Obtain a token via IAM Identity Center (SSO): aws sso login",
-      "Note: bearer tokens expire (typically 1h); re-run aws sso login to refresh.",
-    ].join("\n"),
-  );
-}
-
 function resolveBedrockRegion(options: EmbeddingProviderOptions): string {
   const providerCfg = options.config.models?.providers?.["amazon-bedrock"] as
     | { region?: string }
@@ -100,6 +80,58 @@ function resolveBedrockRegion(options: EmbeddingProviderOptions): string {
     process.env.AWS_DEFAULT_REGION?.trim() ||
     DEFAULT_BEDROCK_REGION
   );
+}
+
+/**
+ * Validate that AWS credentials are available (fail fast at startup).
+ * The SDK uses the default credential chain at request time:
+ *   1. Env vars: AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (+ AWS_SESSION_TOKEN)
+ *   2. SSO / profile credentials
+ *   3. IMDS (EC2 instance role)
+ *
+ * We also accept AWS_BEARER_TOKEN_BEDROCK for backwards compat with the
+ * upstream PR's Bearer token flow (used in local dev with SSO).
+ */
+function validateCredentials(): void {
+  const hasIamCreds = !!(
+    process.env.AWS_ACCESS_KEY_ID?.trim() && process.env.AWS_SECRET_ACCESS_KEY?.trim()
+  );
+  const hasBearer = !!process.env.AWS_BEARER_TOKEN_BEDROCK?.trim();
+  const hasProfile = !!process.env.AWS_PROFILE?.trim();
+
+  if (!hasIamCreds && !hasBearer && !hasProfile) {
+    throw new Error(
+      [
+        'No API key found for provider "bedrock".',
+        "Set AWS credentials via environment variables (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY),",
+        "or AWS_PROFILE, or AWS_BEARER_TOKEN_BEDROCK for SSO.",
+      ].join("\n"),
+    );
+  }
+}
+
+/**
+ * Create a BedrockRuntimeClient with proxy support for Nitro Enclave.
+ * Same pattern as bedrock-discovery.ts createProxyAwareBedrockClient and
+ * pi-ai's amazon-bedrock.js runtime (the proven working path).
+ */
+function createBedrockRuntimeClient(region: string): BedrockRuntimeClient {
+  const proxyUrl =
+    process.env.HTTPS_PROXY ||
+    process.env.https_proxy ||
+    process.env.HTTP_PROXY ||
+    process.env.http_proxy;
+  if (proxyUrl) {
+    const agent = new HttpsProxyAgent(proxyUrl);
+    return new BedrockRuntimeClient({
+      region,
+      requestHandler: new NodeHttpHandler({
+        httpAgent: agent,
+        httpsAgent: agent,
+      }),
+    });
+  }
+  return new BedrockRuntimeClient({ region });
 }
 
 // ---------------------------------------------------------------------------
@@ -119,43 +151,26 @@ export async function createBedrockEmbeddingProvider(
     );
   }
 
-  // Validate token exists at startup (fail fast), but don't capture the value —
-  // it will be re-read at request time so `aws sso login` refreshes are picked up
-  // without restarting the process.
-  resolveBedrockBearerToken(options);
+  // Fail fast if no credentials are available
+  validateCredentials();
 
-  const remoteBaseUrl = options.remote?.baseUrl?.trim();
-  const region = remoteBaseUrl ? null : resolveBedrockRegion(options);
-  const baseUrl = remoteBaseUrl || `https://bedrock-runtime.${region}.amazonaws.com`;
+  const region = resolveBedrockRegion(options);
+  const runtimeClient = createBedrockRuntimeClient(region);
+  const client: BedrockEmbeddingClient = { modelId, region };
 
-  const providerCfg = options.config.models?.providers?.["amazon-bedrock"] as
-    | { headers?: Record<string, string> }
-    | undefined;
-  const staticHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...providerCfg?.headers,
-    ...options.remote?.headers,
-  };
-
-  const client: BedrockEmbeddingClient = { baseUrl, modelId, headers: staticHeaders, region };
-
-  const invokeUrl = `${baseUrl}/model/${encodeURIComponent(modelId)}/invoke`;
   const { defaultDimension, buildRequest, parseResponse } = modelConfig;
 
   const embedSingle = async (text: string): Promise<number[]> => {
     const body = buildRequest(text, defaultDimension);
-    const liveToken = resolveBedrockBearerToken(options);
-    const res = await fetch(invokeUrl, {
-      method: "POST",
-      headers: { ...staticHeaders, Authorization: `Bearer ${liveToken}` },
+    const command = new InvokeModelCommand({
+      modelId,
+      contentType: "application/json",
+      accept: "application/json",
       body: JSON.stringify(body),
     });
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`bedrock embeddings failed: ${res.status} ${errText}`);
-    }
-    const payload = await res.json();
-    return parseResponse(payload);
+    const response = await runtimeClient.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    return parseResponse(responseBody);
   };
 
   return {
