@@ -56,4 +56,13 @@ export default defineConfig([
     fixedExtension: false,
     platform: "node",
   },
+  {
+    // Isol8 enclave: run_agent.mjs dynamically imports runEmbeddedPiAgent from this path.
+    // Must be a separate entry so it exists as dist/agents/pi-embedded-runner.js.
+    entry: "src/agents/pi-embedded-runner.ts",
+    outDir: "dist/agents",
+    env,
+    fixedExtension: false,
+    platform: "node",
+  },
 ]);
