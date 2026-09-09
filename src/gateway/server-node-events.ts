@@ -535,6 +535,18 @@ function restrictedNodeSessionResult(event: string): NodeEventHandleResult {
   return { ok: true, event, handled: false, reason: "restricted_session" };
 }
 
+function resolveNodeSessionAdmissionGuard(
+  ctx: NodeEventContext,
+  sessionKey: string,
+  opts?: { isConnectionCurrent?: () => boolean | Promise<boolean> },
+): (() => boolean | Promise<boolean>) | undefined {
+  if (!ctx.authorizeNodeSessionAccess) {
+    return opts?.isConnectionCurrent;
+  }
+  return async () =>
+    (await isNodeEventConnectionCurrent(opts)) && isNodeSessionAccessCurrent(ctx, sessionKey);
+}
+
 function parsePayloadObject(payloadJSON?: string | null): Record<string, unknown> | null {
   if (!payloadJSON) {
     return null;
@@ -660,6 +672,7 @@ export const handleNodeEvent = async (
         fingerprint,
         receivedAt,
       });
+      const admissionGuard = resolveNodeSessionAdmissionGuard(ctx, canonicalKey, opts);
 
       dispatchReservedVoiceAgentCommand({
         ctx,
@@ -681,9 +694,7 @@ export const handleNodeEvent = async (
           allowModelOverride: false,
         },
         reservation: transcriptReservation,
-        isConnectionCurrent: async () =>
-          (await isNodeEventConnectionCurrent(opts)) &&
-          isNodeSessionAccessCurrent(ctx, canonicalKey),
+        isConnectionCurrent: admissionGuard,
         onStart: () => {
           queueSessionStoreTouch({
             ctx,
@@ -693,9 +704,7 @@ export const handleNodeEvent = async (
             entry,
             sessionId,
             now: receivedAt,
-            isConnectionCurrent: async () =>
-              (await isNodeEventConnectionCurrent(opts)) &&
-              isNodeSessionAccessCurrent(ctx, canonicalKey),
+            isConnectionCurrent: admissionGuard,
           });
 
           // Voice now has a unique per-turn run id, so it is also the stable
@@ -747,6 +756,7 @@ export const handleNodeEvent = async (
       }
       const isRequestCurrent = async () =>
         (await isNodeEventConnectionCurrent(opts)) && isNodeSessionAccessCurrent(ctx, canonicalKey);
+      const admissionGuard = resolveNodeSessionAdmissionGuard(ctx, canonicalKey, opts);
       if (resolveAgentHarnessSessionContextError(canonicalKey, entry)) {
         return undefined;
       }
@@ -960,7 +970,7 @@ export const handleNodeEvent = async (
           allowModelOverride: false,
         },
         dependencies,
-        isRequestCurrent,
+        admissionGuard,
         () =>
           cleanupNodeEventMedia(
             persistedTranscriptMedia.entries.map((media) => media.id),
