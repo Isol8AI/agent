@@ -99,6 +99,96 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
   }
 
   it.each([false, true])(
+    "blocks cold non-directory preparation (Code Mode=%s)",
+    async (codeMode) => {
+      const input = createInput([], []);
+      input.attempt.config = {
+        plugins: { enabled: false },
+        mcp: { servers: { probe: { command: "fixture" } } },
+      };
+      input.attempt.runtimePlan = undefined;
+      Object.assign(input.preparedToolBase, {
+        codeModeControlsEnabledForRun: codeMode,
+        toolSearchControlsEnabledForRun: false,
+      });
+      const deferred = createDeferred<McpToolCatalog>();
+      const entered = createDeferred<void>();
+      const callTool = vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "allowed-cold" }],
+      }));
+      const runtime: SessionMcpRuntime = {
+        sessionId: "session",
+        workspaceDir: "/tmp/workspace",
+        configFingerprint: "cold",
+        createdAt: 0,
+        lastUsedAt: 0,
+        markUsed() {},
+        peekCatalog: () => null,
+        getCatalog: () => {
+          entered.resolve();
+          return deferred.promise;
+        },
+        callTool,
+        dispose: async () => {},
+        joinCleanup: async () => {},
+        acquireLease: () => () => {},
+      };
+      mocks.acquireSessionMcpRuntime.mockResolvedValue({ runtime });
+      mocks.materializeBundleMcpToolsForRun.mockImplementation(materializeBundleMcpToolsForRun);
+      let prepared = false;
+      const pending = prepareEmbeddedAttemptBundleTools(input).then((result) => {
+        prepared = true;
+        return result;
+      });
+      await entered.promise;
+      expect(prepared).toBe(false);
+      expect(mocks.materializeBundleMcpToolsForRun).toHaveBeenCalledWith(
+        expect.objectContaining({ nonBlocking: false }),
+      );
+      deferred.resolve({
+        version: 1,
+        generatedAt: 1,
+        servers: { probe: { serverName: "probe", launchSummary: "probe", toolCount: 2 } },
+        tools: ["allowed", "denied"].map((toolName) => ({
+          serverName: "probe",
+          safeServerName: "probe",
+          toolName,
+          description: toolName,
+          fallbackDescription: toolName,
+          inputSchema: { type: "object", properties: {} },
+        })),
+      });
+      const bundle = await pending;
+      try {
+        let activeToolNames = bundle.uncompactedEffectiveTools.map((tool) => tool.name);
+        const policy = createPromptBuildToolPolicy({
+          session: {
+            getActiveToolNames: () => activeToolNames,
+            setActiveToolsByName: (names) => {
+              activeToolNames = names;
+            },
+          },
+          effectiveTools: bundle.uncompactedEffectiveTools,
+          uncompactedEffectiveTools: bundle.uncompactedEffectiveTools,
+          tools: bundle.tools,
+          codeModeControlsEnabled: false,
+        });
+        const surface = policy.apply(["probe__allowed"]);
+        expect(surface.effectiveTools.map((tool) => tool.name)).toEqual(["probe__allowed"]);
+        expect(activeToolNames).toEqual(["probe__allowed"]);
+        const allowed = surface.effectiveTools.find((tool) => tool.name === "probe__allowed");
+        if (!allowed) {
+          throw new Error("Expected allowed cold MCP tool");
+        }
+        expect(JSON.stringify(await allowed.execute("allowed", {}))).toContain("allowed-cold");
+        expect(callTool).toHaveBeenCalledExactlyOnceWith("probe", "allowed", {});
+      } finally {
+        await bundle.bundleMcpRuntime?.dispose();
+      }
+    },
+  );
+
+  it.each([false, true])(
     "retains prompt policy in the original cold directory (allow MCP=%s)",
     async (allowMcp) => {
       const config = {

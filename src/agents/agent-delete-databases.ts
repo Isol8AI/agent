@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isPathInside } from "../infra/path-guards.js";
 import { resolveSqliteDatabaseFilePaths } from "../infra/sqlite-files.js";
 import { normalizeAgentId } from "../routing/session-key.js";
+import { resolveWorkshopAgentRoot } from "../skills/workshop/agent-root.js";
 import { assertNoOpenClawAgentDatabaseLeases } from "../state/openclaw-agent-db-lease.js";
 import { invalidateRegisteredAgentDatabasesMemo } from "../state/openclaw-agent-db-registry-listing.js";
 import {
@@ -16,6 +17,7 @@ import {
   isPathOwnedByAnotherRegisteredAgent,
   normalizeAgentDirRegistryPath,
 } from "./agent-dir-registry.js";
+import { listAgentIds } from "./agent-scope.js";
 
 export type AgentDeleteDatabasePlan = {
   registrationPaths: string[];
@@ -58,6 +60,20 @@ export function isPathOwnedBySurvivingAgent(
   return (
     isPathOwnedByAnotherRegisteredAgent({ agentId, pathname, env }) ||
     findOverlappingWorkspaceAgentIds(cfg, agentId, pathname, env).length > 0 ||
+    listAgentIds(cfg).some((otherAgentId) => {
+      if (normalizeAgentId(otherAgentId) === normalizeAgentId(agentId)) {
+        return false;
+      }
+      const workshopPath = normalizeAgentDirRegistryPath(
+        resolveWorkshopAgentRoot(otherAgentId, env),
+        env,
+      );
+      return (
+        canonicalPath === workshopPath ||
+        isPathInside(canonicalPath, workshopPath) ||
+        isPathInside(workshopPath, canonicalPath)
+      );
+    }) ||
     survivingDatabaseFilePaths.some(
       (databasePath) =>
         databasePath === canonicalPath ||

@@ -1,6 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadWorkspaceSkills } from "../skills/loading/workspace-skill-loader.js";
+import { resolveWorkshopAgentRoot } from "../skills/workshop/agent-root.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   inspectOpenClawAgentDatabaseOwner,
@@ -64,17 +66,51 @@ describe("agent database recreation product proof", () => {
           env: process.env,
         });
         const originalIdentity = await fs.stat(databasePath, { bigint: true });
+        const workshopRoot = resolveWorkshopAgentRoot(AGENT_ID);
+        const siblingRoot = resolveWorkshopAgentRoot("main");
+        const oldSkillDir = path.join(workshopRoot, "skills", "deleted-instructions");
+        const siblingSkillDir = path.join(siblingRoot, "skills", "surviving-instructions");
+        await fs.mkdir(path.join(workshopRoot, "collection-backups"), { recursive: true });
+        await fs.writeFile(
+          path.join(workshopRoot, "collection-backups", "old.json"),
+          "old collection backup",
+        );
+        for (const [dir, name] of [
+          [oldSkillDir, "deleted-instructions"],
+          [siblingSkillDir, "surviving-instructions"],
+        ] as const) {
+          await fs.mkdir(dir, { recursive: true });
+          await fs.writeFile(
+            path.join(dir, "SKILL.md"),
+            `---\nname: ${name}\ndescription: Workshop deletion regression\n---\nKeep this instruction isolated.\n`,
+          );
+        }
+        const skillOptions = { config: { plugins: { enabled: false } }, agentId: AGENT_ID };
+        expect(
+          loadWorkspaceSkills(workspace, skillOptions).some(
+            (entry) => entry.skill.name === "deleted-instructions",
+          ),
+        ).toBe(true);
 
         await expect(
           client.request("agents.delete", { agentId: AGENT_ID, deleteFiles: true }),
         ).resolves.toMatchObject({ agentId: AGENT_ID, ok: true });
         await expect(fs.stat(databasePath)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(fs.stat(workshopRoot)).rejects.toMatchObject({ code: "ENOENT" });
+        expect(await fs.readFile(path.join(siblingSkillDir, "SKILL.md"), "utf8")).toContain(
+          "surviving-instructions",
+        );
 
         const recreated = await client.request<{ agentId: string; ok: true }>("agents.create", {
           name: "Recreated Agent",
           workspace,
         });
         expect(recreated).toMatchObject({ agentId: AGENT_ID, ok: true });
+        expect(
+          loadWorkspaceSkills(workspace, skillOptions).some(
+            (entry) => entry.skill.name === "deleted-instructions",
+          ),
+        ).toBe(false);
         await expect(
           client.request("sessions.create", { agentId: AGENT_ID, key: SESSION_KEY }),
         ).resolves.toMatchObject({ key: SESSION_KEY });

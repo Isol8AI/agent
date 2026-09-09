@@ -44,7 +44,7 @@ import {
   type ImportSystemProfileResult,
   type SystemProfileInfo,
 } from "./system-profiles.js";
-import { movePathToTrash } from "./trash.js";
+import { movePathToTrash, retireProfileSessionState } from "./trash.js";
 
 /** Input accepted when creating a browser profile. */
 type CreateProfileParams = {
@@ -255,6 +255,10 @@ export function createBrowserProfilesService(ctx: BrowserRouteContext) {
     const runtime = resolved ? getOrCreateProfileRuntime(state, resolved) : undefined;
 
     const persistDelete = async () => {
+      // Retire credentials before committing config removal so a failed retirement is retryable.
+      if (resolved?.cdpIsLoopback && resolved.driver === "openclaw" && !resolved.attachOnly) {
+        await retireProfileSessionState(name, cfg.browser?.sessionState);
+      }
       await deleteBrowserProfileConfig({ name, expected });
       delete state.resolved.profiles[name];
       try {

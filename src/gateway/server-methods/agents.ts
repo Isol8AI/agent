@@ -94,6 +94,8 @@ import { root, FsSafeError, type ReadResult } from "../../infra/fs-safe.js";
 import { isPathInside } from "../../infra/path-guards.js";
 import { movePathToTrash } from "../../plugin-sdk/browser-maintenance.js";
 import { normalizeAgentIdStrict } from "../../routing/session-key.js";
+import { bumpSkillsSnapshotVersion } from "../../skills/runtime/refresh-state.js";
+import { resolveWorkshopAgentRoot } from "../../skills/workshop/agent-root.js";
 import {
   readAgentDeletionJournal,
   type AgentDeletionJournalCleanupPath,
@@ -1049,6 +1051,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
               journal.workspaceDir,
               journal.agentDir,
               journal.sessionsDir,
+              resolveWorkshopAgentRoot(agentId),
               ...journal.databasePaths,
             ].filter((sourcePath) => !fencedSourcePaths.has(path.resolve(sourcePath)));
             if (unfencedSourcePaths.length > 0) {
@@ -1203,6 +1206,13 @@ export const agentsHandlers: GatewayRequestHandlers = {
             deleteResult.sessionsDir,
             survivingDatabaseFilePaths,
           );
+          const workshopDir = resolveWorkshopAgentRoot(agentId);
+          const workshopTrashEligible = !isPathOwnedBySurvivingAgent(
+            nextConfig,
+            agentId,
+            workshopDir,
+            survivingDatabaseFilePaths,
+          );
           const databaseFilePaths = [
             ...(agentDirTrashEligible
               ? (databasePlan?.relocatedFileGroups ?? [])
@@ -1223,6 +1233,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
               ...(workspaceTrashEligible ? [deleteResult.workspaceDir] : []),
               ...(agentDirTrashEligible ? [deleteResult.agentDir] : []),
               ...(sessionsDirTrashEligible ? [deleteResult.sessionsDir] : []),
+              ...(workshopTrashEligible ? [workshopDir] : []),
               ...databaseFilePaths,
             ].map((sourcePath) => path.resolve(sourcePath)),
           );
@@ -1357,6 +1368,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
             });
             if ("removed" in outcome) {
               markCleanupPathDone(cleanupPath);
+              // Invalidate the native loader cache before this ID can be recreated.
+              bumpSkillsSnapshotVersion({
+                workspaceDir: deleteResult.workspaceDir,
+                reason: "workshop",
+              });
             } else if ("skipped" in outcome) {
               markCleanupPathDone(cleanupPath, outcome.skipped.reason);
               protectedCleanupPaths.push({

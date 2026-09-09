@@ -137,7 +137,11 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
   const bundleMcpRuntime = bundleMcpAcquisition
     ? await materializeBundleMcpToolsForRun({
         ...bundleMcpAcquisition,
-        nonBlocking: true,
+        // Only directory controls await the coordinated catalog/session/prompt-policy owner.
+        nonBlocking:
+          !params.preparedToolBase.codeModeControlsEnabledForRun &&
+          params.preparedToolBase.toolSearchControlsEnabledForRun &&
+          params.preparedToolBase.toolSearchConfig.mode === "directory",
         agentId: params.setup.sessionAgentId,
         reservedToolNames: [
           ...tools.map((tool) => tool.name),

@@ -3601,6 +3601,223 @@ test "$package_manager" = "pnpm@12.1.0"
     expect(resolveJob).not.toContain("pnpm install");
   });
 
+  it("binds release evidence validation to the exact trusted workflow ref", () => {
+    for (const [workflowPath, jobName, stepName] of [
+      [
+        OPENCLAW_NPM_RELEASE_WORKFLOW,
+        "publish_openclaw_npm",
+        "Verify full release validation evidence",
+      ],
+    ] as const) {
+      const step = workflowStep(workflowJob(workflowPath, jobName), stepName);
+      expect(step.env).toMatchObject({
+        TRUSTED_WORKFLOW_FULL_REF: "${{ github.ref }}",
+        TRUSTED_WORKFLOW_REF: "${{ github.ref_name }}",
+        TRUSTED_WORKFLOW_SHA: "${{ github.workflow_sha }}",
+      });
+      expect(step.run).toContain("^refs/tags/release-publish/[a-f0-9]{12}-[1-9][0-9]*$");
+      expect(step.run).toContain('trusted_publisher_ref="refs/tags/${TRUSTED_WORKFLOW_REF}"');
+      expect(step.run).toContain('git rev-parse "${trusted_publisher_ref}^{commit}")" != "${');
+      expect(step.run).toContain('"+refs/heads/main:${trusted_main_ref}"');
+      expect(step.run).toContain('TRUSTED_MAIN_REF="${trusted_main_ref}"');
+      expect(step.run).toContain('--trusted-workflow-ref "$TRUSTED_WORKFLOW_REF"');
+      expect(step.run).toContain('--trusted-workflow-full-ref "$TRUSTED_WORKFLOW_FULL_REF"');
+      expect(step.run).toContain('--trusted-workflow-sha "$TRUSTED_WORKFLOW_SHA"');
+      expect(step.run).toContain('--verifier-source-sha "$');
+    }
+  });
+
+  it("keeps beta performance advisory at the publish gate", () => {
+    const npmValidationStep = workflowStep(
+      workflowJob(".github/workflows/openclaw-npm-release.yml", "publish_openclaw_npm"),
+      "Verify full release validation target",
+    );
+
+    expectTextToIncludeAll(npmValidationStep.run, [
+      'if [[ "$RELEASE_NPM_DIST_TAG" != "beta" && "$PERFORMANCE_BLOCKING" != "true" ]]',
+      "Full release validation manifest does not record blocking product performance evidence.",
+    ]);
+  });
+
+  it("compares dependency evidence zip contents independently of archive timestamps", () => {
+    const tempDir = tempDirs.make("release-evidence-zip-");
+    const sourceDir = `${tempDir}/source`;
+    const existingDir = `${tempDir}/existing`;
+    const sourceZip = `${tempDir}/source.zip`;
+    const existingZip = `${tempDir}/existing.zip`;
+    const symlinkZip = `${tempDir}/symlink.zip`;
+    const corruptZip = `${tempDir}/corrupt.zip`;
+    const npmLocks = `${JSON.stringify({ packages: [{ lock: "x".repeat(3 * 1024 * 1024) }] })}\n`;
+    const evidenceNames = ["proof.json", "npm-package-locks.json", "npm-package-locks.md"].map(
+      (name) => `dependency-evidence/${name}`,
+    );
+    for (const dir of [sourceDir, existingDir]) {
+      mkdirSync(`${dir}/dependency-evidence`, { recursive: true });
+      writeFileSync(`${dir}/dependency-evidence/proof.json`, '{"ok":true}\n');
+      writeFileSync(`${dir}/dependency-evidence/npm-package-locks.json`, npmLocks);
+      writeFileSync(`${dir}/dependency-evidence/npm-package-locks.md`, "# npm locks\n");
+    }
+    execFileSync("touch", [
+      "-t",
+      "198001010000",
+      ...evidenceNames.map((name) => `${sourceDir}/${name}`),
+    ]);
+    execFileSync("touch", [
+      "-t",
+      "202001010000",
+      ...evidenceNames.map((name) => `${existingDir}/${name}`),
+    ]);
+    execFileSync("zip", ["-X", "-q", sourceZip, ...evidenceNames], {
+      cwd: sourceDir,
+    });
+    execFileSync("zip", ["-X", "-q", existingZip, ...evidenceNames], {
+      cwd: existingDir,
+    });
+    symlinkSync("../../outside", `${existingDir}/dependency-evidence/link`);
+    execFileSync("zip", ["-X", "-y", "-q", symlinkZip, "dependency-evidence/link"], {
+      cwd: existingDir,
+    });
+    const sourceArchive = readFileSync(sourceZip);
+    writeFileSync(corruptZip, sourceArchive.subarray(0, -10));
+
+    const compare = (left: string, right: string) =>
+      spawnSync("python3", ["scripts/compare-release-evidence-zip.py", left, right], {
+        encoding: "utf8",
+      });
+
+    const result = compare(sourceZip, existingZip);
+    const symlinkResult = compare(symlinkZip, symlinkZip);
+    const corruptResult = compare(corruptZip, corruptZip);
+
+    expect(result.status, result.stderr).toBe(0);
+    writeFileSync(`${existingDir}/dependency-evidence/npm-package-locks.json`, `${npmLocks} `);
+    execFileSync("zip", ["-X", "-q", existingZip, "dependency-evidence/npm-package-locks.json"], {
+      cwd: existingDir,
+    });
+    expect(compare(sourceZip, existingZip).status).toBe(1);
+    expect(symlinkResult.status).toBe(1);
+    expect(symlinkResult.stderr).toContain("unsupported dependency evidence archive entry");
+    expect(corruptResult.status).toBe(1);
+    expect(corruptResult.stderr).toContain("dependency evidence ZIP comparison failed");
+  });
+
+  it("bounds the npm registry tarball download used for release resume", () => {
+    const publishRun = readFileSync("scripts/lib/release-publish-children.sh", "utf8");
+    const resolvePublishState = shellFunctionSource(
+      publishRun,
+      "resolve_openclaw_npm_publish_state",
+    );
+    const registryDownload = resolvePublishState.match(
+      /curl -fsSL[\s\S]*?"\$\{published_tarball_url\}"/u,
+    )?.[0];
+
+    expect(registryDownload).toContain("--connect-timeout 10");
+    expect(registryDownload).toContain("--max-time 120");
+    expect(registryDownload).toContain("--retry 3");
+    expect(registryDownload).toContain("--retry-max-time 180");
+    expect(registryDownload).toContain('-o "${published_tarball_path}"');
+  });
+
+  it("fails closed when child environment identity or approval mutation fails", () => {
+    const publishRun = readFileSync("scripts/lib/release-publish-children.sh", "utf8");
+    const verifyChild = shellFunctionSource(publishRun, "verify_child_run_sha");
+    const approvePending = shellFunctionSource(publishRun, "approve_pending_deployments");
+    const approveChild = shellFunctionSource(publishRun, "approve_child_publish_environment");
+    const waitForRun = shellFunctionSource(publishRun, "wait_for_run");
+    const expectedSha = "a".repeat(40);
+
+    const mutationFailure = spawnSync(
+      "bash",
+      [
+        "-c",
+        `
+set -uo pipefail
+GITHUB_REPOSITORY=openclaw/openclaw
+gh() {
+  if [[ "$1" == "run" && "$2" == "view" ]]; then
+    printf '%s\\n' '{"headSha":"${expectedSha}","url":"https://example.invalid/run/123"}'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "-X" && "$3" == "GET" ]]; then
+    printf '%s\\n' '[{"environment":{"id":7,"name":"clawhub-plugin-bootstrap"},"current_user_can_approve":true}]'
+    return 0
+  fi
+  if [[ "$1" == "api" && "$2" == "-X" && "$3" == "POST" ]]; then
+    return 42
+  fi
+  return 99
+}
+${verifyChild}
+${approvePending}
+status=0
+approve_pending_deployments plugin-clawhub-new.yml 123 "${expectedSha}" || status=$?
+[[ "$status" -eq 2 ]]
+`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(mutationFailure.status, mutationFailure.stderr).toBe(0);
+
+    const mismatchedApprovedSha = spawnSync(
+      "bash",
+      [
+        "-c",
+        `
+set -uo pipefail
+GITHUB_REPOSITORY=openclaw/openclaw
+GITHUB_STEP_SUMMARY=/dev/null
+gh() {
+  if [[ "$1" == "run" && "$2" == "view" ]]; then
+    printf '%s\\n' '{"headSha":"${"b".repeat(40)}","url":"https://example.invalid/run/123"}'
+    return 0
+  fi
+  if [[ "$1" == "run" && "$2" == "cancel" ]]; then
+    return 0
+  fi
+  return 99
+}
+print_failed_run_summary() { :; }
+${verifyChild}
+${approvePending}
+${approveChild}
+status=0
+approve_child_publish_environment plugin-clawhub-new.yml 123 "${expectedSha}" || status=$?
+[[ "$status" -eq 2 ]]
+`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(mismatchedApprovedSha.status, mismatchedApprovedSha.stderr).toBe(0);
+
+    const mismatchedWaitSha = spawnSync(
+      "bash",
+      [
+        "-c",
+        `
+set -uo pipefail
+GITHUB_REPOSITORY=openclaw/openclaw
+gh() {
+  if [[ "$1" == "run" && "$2" == "view" ]]; then
+    printf '%s\\n' '{"headSha":"${"b".repeat(40)}","url":"https://example.invalid/run/123"}'
+    return 0
+  fi
+  if [[ "$1" == "run" && "$2" == "cancel" ]]; then
+    return 0
+  fi
+  return 99
+}
+${verifyChild}
+${waitForRun}
+status=0
+wait_for_run plugin-clawhub-new.yml 123 "${expectedSha}" || status=$?
+[[ "$status" -eq 1 ]]
+`,
+      ],
+      { encoding: "utf8" },
+    );
+    expect(mismatchedWaitSha.status, mismatchedWaitSha.stderr).toBe(0);
+  });
+
   it("offers bounded product profiles and can run Telegram against the resolved artifact", () => {
     const parsedWorkflow = readWorkflow(PACKAGE_ACCEPTANCE_WORKFLOW);
     const workflow = readFileSync(PACKAGE_ACCEPTANCE_WORKFLOW, "utf8");

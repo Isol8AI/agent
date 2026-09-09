@@ -13,8 +13,15 @@ import {
   getProfileLifecycle,
   getOrCreateProfileRuntime,
   registerProfileHandle,
+  withProfileOperationLease,
 } from "./server-context.lifecycle.js";
-import { movePathToTrash } from "./trash.js";
+import { createProfileResetOps } from "./server-context.reset.js";
+import {
+  resolveProfileSessionStatePath,
+  restoreSessionState,
+  snapshotSessionState,
+} from "./session-state-store.js";
+import { movePathToTrash, retireProfileSessionState } from "./trash.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
@@ -80,6 +87,16 @@ vi.mock("../config/config.js", async () => {
 
 vi.mock("./trash.js", () => ({
   movePathToTrash: vi.fn(async (targetPath: string) => targetPath),
+  retireProfileSessionState: vi.fn(async () => {}),
+}));
+
+vi.mock("openclaw/plugin-sdk/browser-config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/browser-config")>()),
+  movePathToTrash: vi.fn(async (targetPath: string) => {
+    const destination = `${targetPath}.retired`;
+    await fs.promises.rename(targetPath, destination);
+    return destination;
+  }),
 }));
 
 vi.mock("./chrome-mcp.runtime.js", () => ({
@@ -182,12 +199,125 @@ describe("BrowserProfilesService", () => {
     configMocks.writeConfigFile.mockReset().mockResolvedValue(undefined);
     lifecycleMocks.closeChromeMcpSession.mockReset().mockResolvedValue(false);
     lifecycleMocks.stopOpenClawChrome.mockReset().mockResolvedValue(undefined);
+    vi.mocked(retireProfileSessionState).mockReset().mockResolvedValue(undefined);
     vi.mocked(resolveOpenClawUserDataDir)
       .mockReset()
       .mockReturnValue("/tmp/openclaw-test/openclaw/user-data");
     vi.mocked(movePathToTrash)
       .mockReset()
       .mockImplementation(async (targetPath) => targetPath);
+  });
+
+  it.each(["reset", "delete"] as const)(
+    "retires snapshots after in-flight writers before %s profile reuse",
+    async (operation) => {
+      const root = await tempDirs.make("browser-session-retirement-");
+      const snapshotBase = path.join(root, "state.json");
+      const snapshotPath = resolveProfileSessionStatePath(snapshotBase, "work");
+      const siblingPath = resolveProfileSessionStatePath(snapshotBase, "sibling");
+      const { ctx, state, service } = createDeletionFixture({
+        resolvedProfile: { cdpPort: 18801, color: "#0066CC" },
+      });
+      const cfg = getRuntimeConfig();
+      if (!cfg.browser) {
+        throw new Error("Expected browser config");
+      }
+      cfg.browser.sessionState = { path: snapshotBase };
+      configMocks.writeConfigFile.mockImplementation(async (next) => {
+        configMocks.getRuntimeConfig.mockReturnValue(next);
+      });
+      vi.mocked(resolveOpenClawUserDataDir).mockReturnValue(path.join(root, "absent-user-data"));
+      const actualTrash = await vi.importActual<typeof import("./trash.js")>("./trash.js");
+      vi.mocked(retireProfileSessionState).mockImplementation(
+        actualTrash.retireProfileSessionState,
+      );
+      const profile = resolveProfile(state.resolved, "work");
+      if (!profile) {
+        throw new Error("Expected work profile");
+      }
+      const runtime = getOrCreateProfileRuntime(state, profile);
+      const entered = deferred();
+      const release = deferred();
+      await fs.promises.writeFile(siblingPath, "sibling credentials");
+      await fs.promises.writeFile(
+        snapshotPath,
+        JSON.stringify({
+          version: 1,
+          savedAt: new Date().toISOString(),
+          cookies: [],
+          origins: [{ origin: "https://example.com", localStorage: { token: "old-storage" } }],
+        }),
+      );
+      const writer = withProfileOperationLease({
+        state,
+        runtime,
+        configRevision: getProfileLifecycle(runtime).configRevision,
+        run: async () => {
+          await snapshotSessionState(async (method) => {
+            if (method === "Storage.getCookies") {
+              entered.resolve();
+              await release.promise;
+              return {
+                cookies: [{ name: "secret", value: "old", domain: "example.com", path: "/" }],
+              };
+            }
+            return { targetInfos: [] };
+          }, snapshotPath);
+        },
+      });
+      await entered.promise;
+      const writerRejected = expect(writer).rejects.toThrow();
+      const transition =
+        operation === "reset"
+          ? createProfileResetOps({
+              profile,
+              state: () => state,
+              runtime,
+              configRevision: getProfileLifecycle(runtime).configRevision,
+              resolveOpenClawUserDataDir,
+            }).resetProfile()
+          : service.deleteProfile("work");
+      expect(retireProfileSessionState).not.toHaveBeenCalled();
+      release.resolve();
+      await Promise.all([writerRejected, transition]);
+      expect(await fs.promises.readFile(`${snapshotPath}.retired`, "utf8")).toContain("secret");
+      expect(await fs.promises.readFile(`${snapshotPath}.retired`, "utf8")).toContain(
+        "old-storage",
+      );
+      expect(await fs.promises.readFile(siblingPath, "utf8")).toBe("sibling credentials");
+      if (operation === "delete") {
+        await service.createProfile({ name: "work" });
+      }
+      const reusedProfile = resolveProfile(state.resolved, "work");
+      if (!reusedProfile) {
+        throw new Error("Expected reusable work profile");
+      }
+      const reusedRuntime = getOrCreateProfileRuntime(state, reusedProfile);
+      const send = vi.fn(async () => ({}));
+      await enqueueProfileStart({
+        state: ctx.state(),
+        runtime: reusedRuntime,
+        configRevision: getProfileLifecycle(reusedRuntime).configRevision,
+        key: "restore-on-launch",
+        run: async () => {
+          expect(await restoreSessionState(send, snapshotPath)).toBeNull();
+        },
+      });
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps profile config retryable when snapshot retirement fails", async () => {
+    const { service, state } = createDeletionFixture({
+      resolvedProfile: { cdpPort: 18801, color: "#0066CC" },
+    });
+    vi.mocked(retireProfileSessionState).mockRejectedValueOnce(
+      new Error("snapshot trash unavailable"),
+    );
+    await expect(service.deleteProfile("work")).rejects.toThrow("snapshot trash unavailable");
+    expect(writeConfigFile).not.toHaveBeenCalled();
+    expect(state.resolved.profiles.work).toBeDefined();
+    await expect(service.deleteProfile("work")).resolves.toMatchObject({ ok: true });
   });
 
   it("allocates next local port for new profiles", async () => {
