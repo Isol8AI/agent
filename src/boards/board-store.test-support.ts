@@ -8,8 +8,15 @@ import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { AGENT_V14_SESSION_SHARING_SCHEMA_SQL } from "../state/openclaw-agent-session-sharing-schema.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { SqliteBoardStore } from "./sqlite-board-store.js";
+
+export const v14SharingResetSql = `
+  DROP TABLE session_participants;
+  DROP TABLE session_members;
+  ${AGENT_V14_SESSION_SHARING_SCHEMA_SQL}
+`;
 
 export function createTestBoardStore(options: { stateDir?: string } = {}): SqliteBoardStore {
   const ownsStateDir = options.stateDir === undefined;

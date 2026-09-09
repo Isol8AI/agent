@@ -1,3 +1,4 @@
+import * as sessionsCreate from "./sessions-create.js";
 import * as viewerPresence from "./sessions-viewer-presence.js";
 import * as sessions from "./sessions.js";
 
@@ -49,6 +50,8 @@ export const SessionLifecycleProtocolSchemas = {
   SessionsRecoverParams: sessions.SessionsRecoverParamsSchema,
   SessionsRecoverResult: sessions.SessionsRecoverResultSchema,
   SessionsSendParams: sessions.SessionsSendParamsSchema,
+  SessionMessageAppendParams: sessionsCreate.SessionMessageAppendParamsSchema,
+  SessionMessageAppendResult: sessionsCreate.SessionMessageAppendResultSchema,
   SessionsMessagesSubscribeParams: sessions.SessionsMessagesSubscribeParamsSchema,
   SessionsMessagesUnsubscribeParams: sessions.SessionsMessagesUnsubscribeParamsSchema,
   SessionsViewerPresenceSetParams: viewerPresence.SessionsViewerPresenceSetParamsSchema,

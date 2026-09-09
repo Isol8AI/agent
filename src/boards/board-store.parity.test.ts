@@ -12,7 +12,7 @@ import {
 } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import type { BoardStore } from "./board-store.js";
-import { createTestBoardStore } from "./board-store.test-support.js";
+import { createTestBoardStore, v14SharingResetSql } from "./board-store.test-support.js";
 import { SqliteBoardStore } from "./sqlite-board-store.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -599,7 +599,7 @@ describe("SqliteBoardStore persistence", () => {
     existingV14.exec(`
       DROP TABLE board_widgets;
       DROP TABLE board_tabs;
-      DROP TABLE session_participants;
+      ${v14SharingResetSql}
       PRAGMA user_version = 14;
       UPDATE schema_meta SET schema_version = 14 WHERE meta_key = 'primary';
     `);
@@ -697,7 +697,7 @@ describe("SqliteBoardStore persistence", () => {
         ON board_widgets(session_key, tab_id, position);
       COMMIT;
       PRAGMA foreign_keys = ON;
-      DROP TABLE session_participants;
+      ${v14SharingResetSql}
       PRAGMA user_version = 14;
       UPDATE schema_meta SET schema_version = 14 WHERE meta_key = 'primary';
     `);

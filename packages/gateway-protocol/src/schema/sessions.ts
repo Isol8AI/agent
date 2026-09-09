@@ -482,7 +482,6 @@ export const SessionsCreateResultSchema = Type.Object(
   { additionalProperties: true },
 );
 
-/** Sends one message into an existing session. */
 export const SessionsSendParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),

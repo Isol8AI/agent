@@ -100,6 +100,7 @@ export function canUseSessionBearerCapability(
     sessionKey: params.sessionKey,
     ...(params.agentId ? { agentId: params.agentId } : {}),
     exactRead: true,
+    projection: "full",
   });
   if (!target || resolveSessionVisibility(target.entry) !== "restricted") {
     return true;

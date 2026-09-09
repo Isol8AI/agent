@@ -194,6 +194,7 @@ test("restricted reads require typed membership and never trust participant hist
   const ownerId = ensureProfileForEmail("restricted-owner@example.test").id;
   const memberId = ensureProfileForEmail("restricted-member@example.test").id;
   const participantId = ensureProfileForEmail("restricted-participant@example.test").id;
+  const outsiderId = ensureProfileForEmail("restricted-outsider@example.test").id;
   const sessionKey = "agent:main:restricted-read-surfaces";
   const sessionId = "session-restricted-read-surfaces";
   const parentKey = "agent:main:visible-parent";
@@ -315,7 +316,7 @@ test("restricted reads require typed membership and never trust participant hist
     };
   };
 
-  for (const profileId of [participantId, "restricted-outsider@example.test"]) {
+  for (const profileId of [participantId, outsiderId]) {
     const hidden = await readFor(profileId);
     expect(hidden.searched.payload?.results).toEqual([]);
     expect(hidden.listed.sessions.some((session) => session.key === sessionKey)).toBe(false);

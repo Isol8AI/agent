@@ -33,6 +33,7 @@ import { SessionMutationAuthorizationChangedError } from "./session-mutation-aut
 import {
   authorizeIncognitoSessionTarget,
   authorizeSessionAgentRun,
+  authorizeSessionMessageAppendTarget,
   authorizeSessionReadTarget,
   authorizeSessionSharingTarget,
   canManageSessionSharing,
@@ -84,6 +85,10 @@ const AGENT_RUN_START_METHODS = new Set([
 ]);
 
 function requiresPrivateRoomCapability(method: string): boolean {
+  // Canonical message persistence has no execution, tool, or delivery capability.
+  if (method === "sessions.message.append") {
+    return false;
+  }
   return (
     !isSessionReadAccessMethod(method) ||
     method === "sessions.companion.ask" ||
@@ -169,7 +174,7 @@ export function resolveSessionMutationAuthorization(params: {
     isGatewayAdmin(params.client) &&
     !authorizesAgentRun &&
     !requiresPrivateRoomCapability(params.method);
-  if (adminBypass && !bindsProgressLifecycle) {
+  if (adminBypass && !bindsProgressLifecycle && !isRequiredSessionTargetMethod(params.method)) {
     return { error: null };
   }
   if (
@@ -185,6 +190,10 @@ export function resolveSessionMutationAuthorization(params: {
   // config change cannot split target discovery from authorization.
   let cachedCfg: OpenClawConfig | undefined;
   const getCfg = (): OpenClawConfig => (cachedCfg ??= params.context.getRuntimeConfig());
+  const authorizeMutationTarget = (cfg: OpenClawConfig, target: SessionSharingTarget) =>
+    params.method === "sessions.message.append"
+      ? authorizeSessionMessageAppendTarget({ cfg, client: params.client, target })
+      : authorizeSessionSharingTarget({ cfg, client: params.client, target });
   // Each cache pair defines one synchronous freshness epoch: initial authorization shares one,
   // while commit-time guards start fresh after handler work.
   const createLookupCaches = (): {
@@ -197,14 +206,21 @@ export function resolveSessionMutationAuthorization(params: {
     targetCount: number,
   ): { target: SessionSharingTarget | null } | { error: ErrorShape } => {
     try {
+      const lookup = {
+        cfg: getCfg(),
+        sessionKey: targetRef.sessionKey,
+        agentId: targetRef.agentId,
+        ...(lookupCaches ??= createLookupCaches()),
+        exactRead: targetCount === 1,
+      };
+      const target = resolveSessionSharingTarget(lookup);
       return {
-        target: resolveSessionSharingTarget({
-          cfg: getCfg(),
-          sessionKey: targetRef.sessionKey,
-          agentId: targetRef.agentId,
-          ...(lookupCaches ??= createLookupCaches()),
-          exactRead: targetCount === 1,
-        }),
+        target:
+          target &&
+          resolveSessionVisibility(target.entry) === "restricted" &&
+          requiresPrivateRoomCapability(params.method)
+            ? resolveSessionSharingTarget({ ...lookup, projection: "full" })
+            : target,
       };
     } catch (error) {
       if (error instanceof AgentSelectionRequiredError) {
@@ -316,7 +332,7 @@ export function resolveSessionMutationAuthorization(params: {
       target && resolveSessionVisibility(target.entry) === "restricted"
         ? authorizesRead
           ? authorizeSessionReadTarget({ cfg: getCfg(), client: params.client, target })
-          : authorizeSessionSharingTarget({ cfg: getCfg(), client: params.client, target })
+          : authorizeMutationTarget(getCfg(), target)
         : null;
     const error =
       restrictedAccessError ??
@@ -344,7 +360,7 @@ export function resolveSessionMutationAuthorization(params: {
         resolveSessionVisibility(target.entry) !== "restricted" &&
         (operatorSessionCap(params.client, getCfg()) ?? "write") === "write"
       )
-        ? authorizeSessionSharingTarget({ cfg: getCfg(), client: params.client, target })
+        ? authorizeMutationTarget(getCfg(), target)
         : null);
     if (error) {
       return { error };
@@ -420,13 +436,20 @@ export function resolveSessionMutationAuthorization(params: {
         currentLookupCaches?: ReturnType<typeof createLookupCaches>,
         ensuredSessionId?: string,
       ) => {
-        const current = resolveSessionSharingTarget({
+        const currentLookup = {
           cfg: currentCfg,
           sessionKey: targetRef.sessionKey,
           agentId: targetRef.agentId,
           ...currentLookupCaches,
           exactRead: !currentLookupCaches || authorizedTargets.length === 1,
-        });
+        };
+        const projectedCurrent = resolveSessionSharingTarget(currentLookup);
+        const current =
+          projectedCurrent &&
+          resolveSessionVisibility(projectedCurrent.entry) === "restricted" &&
+          requiresPrivateRoomCapability(params.method)
+            ? resolveSessionSharingTarget({ ...currentLookup, projection: "full" })
+            : projectedCurrent;
         // The guarded ensure may mint this row/id. Its result permits only that
         // materialization, never a replacement of an already admitted session.
         const ensuredTarget =
@@ -470,11 +493,7 @@ export function resolveSessionMutationAuthorization(params: {
                   client: params.client,
                   target: current,
                 })
-              : authorizeSessionSharingTarget({
-                  cfg: currentCfg,
-                  client: params.client,
-                  target: current,
-                })
+              : authorizeMutationTarget(currentCfg, current)
             : null;
         const error =
           restrictedAccessError ??
@@ -498,11 +517,7 @@ export function resolveSessionMutationAuthorization(params: {
                 target: current,
               })
             : resolveSessionVisibility(current.entry) !== "restricted"
-              ? authorizeSessionSharingTarget({
-                  cfg: currentCfg,
-                  client: params.client,
-                  target: current,
-                })
+              ? authorizeMutationTarget(currentCfg, current)
               : null);
         if (error) {
           throw new SessionMutationAuthorizationChangedError(error);
@@ -591,25 +606,24 @@ export function canReceiveSessionEvent(params: {
     targetDiscoveryCache: new Map(),
   };
   const visible = sessionKeys.every((sessionKey) => {
-    const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
-    if (!target) {
-      return false;
-    }
     const snapshot = loadSharingSnapshot({ ...lookup, sessionKey });
-    const isCreator = sharing.isCreator(target.entry.createdActor);
-    if (
-      target.entry.incognito === true ||
-      isIncognitoSessionKey(target.canonicalKey) ||
-      snapshot.incognito ||
-      (hidesForeignSessions && !isCreator)
-    ) {
+    const isCreator = sharing.isCreator(snapshot.createdActor);
+    if (snapshot.incognito || (hidesForeignSessions && !isCreator)) {
       return false;
     }
-    if (resolveSessionVisibility(target.entry) === "restricted") {
+    if (snapshot.visibility === "restricted") {
+      if (!identity) {
+        return false;
+      }
+      const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
+      if (!target) {
+        return false;
+      }
       return sharing.canReadTarget(target);
     }
     if (!identity) {
       return (
+        snapshot.visibility !== "draft" &&
         (!cfg.gateway?.roles || operatorActor?.kind === "system") &&
         event !== "session.suggestion" &&
         event !== "session.typing"
@@ -621,7 +635,8 @@ export function canReceiveSessionEvent(params: {
     if (event !== "session.typing") {
       return false;
     }
-    return canManageSessionSharing(sharing.roleForTarget(target));
+    const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
+    return target !== null && canManageSessionSharing(sharing.roleForTarget(target));
   });
   if (!visible || event !== "session.suggestion") {
     return visible;

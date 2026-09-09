@@ -261,6 +261,44 @@ methods. Treat this as feature discovery, not a full enumeration of
   </Accordion>
 </AccordionGroup>
 
+### Persist a session message
+
+`sessions.message.append` requires `operator.write` and an authenticated human
+profile or active internal agent run. It commits a message to the canonical
+session transcript without starting inference, reserving a run, steering work,
+or delivering through a channel. Restricted rooms require current membership.
+
+The closed request is
+`{ sessionKey, expectedSessionId, idempotencyKey, text, replyToId?, mentions? }`.
+All required strings are non-empty; `text` is limited to 100,000 characters.
+`mentions` contains at most 100 `{ type: "profile" | "agent", id }` objects.
+Sender identity, role, timestamp, model, display fields, and delivery options
+are server-owned and cannot appear in the request.
+
+The result is
+`{ sessionKey, sessionId, messageId, messageSeq, effectiveParentId?, appended }`.
+`messageSeq` is the one-based committed transcript message position. An
+identical retry returns the same receipt with `appended: false`; different
+content under the same producer key returns `INVALID_REQUEST`. Human keys are
+scoped to the authenticated profile. Agent result keys come from the admitted
+run instance and run ID, permitting one result per run and target session;
+changing a client-supplied key cannot create another agent result.
+
+`expectedSessionId` rejects a reset, deleted, or rebound session. `replyToId`
+must identify an active message in that exact session; it is semantic reply
+metadata, never a transcript branch parent. Independent concurrent appends use
+the durable tail. A product thread keeps its own child-session transcript and
+its immutable parent-room origin link.
+
+After commit, normal `session.message` events and history expose the stored
+message ID, sequence, timestamp, and `__openclaw.senderIdentity`, plus optional
+`__openclaw.replyToId` and `__openclaw.mentions`. Replays do not emit duplicate
+events or increment participant activity. Membership and active run authority
+are rechecked before persistence. Invalid identity, membership, reply, or
+session state returns `INVALID_REQUEST`; storage failures return `UNAVAILABLE`.
+Refresh the session before retrying a stale instance, and reuse the original
+producer key when reconciling an uncertain append.
+
 ### Session list bootstrap
 
 Call `sessions.subscribe` with a non-empty `sessions.list` parameter object, such

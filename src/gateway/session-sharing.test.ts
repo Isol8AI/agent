@@ -5,6 +5,7 @@ import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.j
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import type { GatewayClient, GatewayRequestContext } from "./server-methods/types.js";
+import { isSessionReadAccessMethod } from "./session-method-policy.js";
 import {
   allowedSessionVisibilities,
   authorizeIncognitoSessionTarget,
@@ -344,6 +345,9 @@ describe("session sharing policy", () => {
         false,
       );
       expect(
+        canReceiveSessionEvent({ cfg: {}, client: client({}) as never, sessionKeys: [sessionKey] }),
+      ).toBe(false);
+      expect(
         authorizeResolvedSessionMutation({
           cfg,
           client: writer,
@@ -355,6 +359,7 @@ describe("session sharing policy", () => {
       const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
       for (const [method, requestParams] of [
         ["chat.history", { sessionKey }],
+        ["sessions.message.append", { sessionKey }],
         ["sessions.get", { key: sessionKey }],
         ["sessions.messages.subscribe", { key: sessionKey }],
         ["sessions.viewers.set", { sessionKeys: [sessionKey] }],
@@ -382,11 +387,17 @@ describe("session sharing policy", () => {
         ["tools.invoke", { sessionKey }],
         ["chat.send", { sessionKey }],
       ] as const) {
-        expect(
-          resolveSessionMutationAuthorization({ client: writer, method, requestParams, context })
-            .error,
+        const error = resolveSessionMutationAuthorization({
+          client: writer,
           method,
-        ).toMatchObject({ details: { code: "SESSION_PARTICIPATION_REQUIRED" } });
+          requestParams,
+          context,
+        }).error;
+        expect(error, method).toMatchObject(
+          isSessionReadAccessMethod(method) || method === "sessions.message.append"
+            ? { message: `Session "${sessionKey}" was not found.` }
+            : { details: { code: "SESSION_PARTICIPATION_REQUIRED" } },
+        );
       }
 
       addSessionMember(
@@ -765,7 +776,7 @@ describe("session sharing policy", () => {
     expect(isListed(viewer, "main", entry)).toBe(false);
   });
 
-  it("keeps incognito admin-only while treating identityless connections as owner-equivalent", async () => {
+  it("keeps incognito events admin-only while treating identityless requests as owner-equivalent", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const sessionKey = "agent:main:dashboard:incognito-private";
       const sessionAlias = "dashboard:incognito-private";
@@ -806,7 +817,7 @@ describe("session sharing policy", () => {
             client: requestClient as never,
             sessionKeys: [sessionKey],
           }),
-        ).toBe(visible);
+        ).toBe(requestClient === admin);
         for (const requestedKey of [sessionKey, sessionAlias]) {
           for (const request of directRequests(requestedKey)) {
             const { error } = resolveSessionMutationAuthorization({
@@ -904,7 +915,7 @@ describe("session sharing policy", () => {
 
   it("fails closed when a required session mutation has no target", () => {
     const context = { chatAbortControllers: new Map(), getRuntimeConfig: () => ({}) } as never;
-    for (const method of ["sessions.reset", "sessions.move"]) {
+    for (const method of ["sessions.reset", "sessions.move", "sessions.message.append"]) {
       expect(
         resolveSessionMutationAuthorization({
           client: client({}),
@@ -915,14 +926,17 @@ describe("session sharing policy", () => {
         method,
       ).toMatchObject({ details: { code: "SESSION_MUTATION_TARGET_REQUIRED" } });
     }
-    expect(
-      resolveSessionMutationAuthorization({
-        client: client({ scopes: ["operator.admin"] }),
-        method: "sessions.reset",
-        requestParams: {},
-        context,
-      }).error,
-    ).toBeNull();
+    for (const method of ["sessions.reset", "sessions.message.append"]) {
+      expect(
+        resolveSessionMutationAuthorization({
+          client: client({ scopes: ["operator.admin"] }),
+          method,
+          requestParams: {},
+          context,
+        }).error,
+        method,
+      ).toMatchObject({ details: { code: "SESSION_MUTATION_TARGET_REQUIRED" } });
+    }
   });
 
   it("fails closed for scoped events whose session row was deleted", () => {

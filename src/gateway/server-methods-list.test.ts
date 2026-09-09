@@ -98,6 +98,7 @@ describe("listGatewayMethods", () => {
       "session.publicShare.set",
       "claws.monitors",
       "sessions.room.create",
+      "sessions.message.append",
     ]);
   });
 

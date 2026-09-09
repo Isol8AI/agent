@@ -14,8 +14,37 @@ import {
   resolveSessionSharingRole,
   resolveSessionSharingTarget,
 } from "./session-sharing.js";
+import { sharingPolicyClient } from "./session-sharing.test-utils.js";
 
 describe("creator namespace authorization", () => {
+  it("keeps identity-less event fanout on shared sessions and off drafts or missing rows", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const sharedKey = "agent:main:identityless-shared";
+      const draftKey = "agent:main:identityless-draft";
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey: sharedKey },
+        { sessionId: "identityless-shared", updatedAt: 1, visibility: "shared" },
+      );
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey: draftKey },
+        { sessionId: "identityless-draft", updatedAt: 1, visibility: "draft" },
+      );
+      const client = sharingPolicyClient({});
+      expect(canReceiveSessionEvent({ cfg: {}, client, sessionKeys: [sharedKey] })).toBe(true);
+      for (const sessionKey of [draftKey, "agent:main:identityless-missing"]) {
+        expect(
+          canReceiveSessionEvent({
+            cfg: {},
+            client,
+            sessionKeys: [sessionKey],
+            event: "session.message",
+          }),
+          sessionKey,
+        ).toBe(false);
+      }
+    });
+  });
+
   it("reuses caller alias facts across rows and refreshes them after a real merge", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const caller = ensureProfileForEmail("cached-caller@example.test");

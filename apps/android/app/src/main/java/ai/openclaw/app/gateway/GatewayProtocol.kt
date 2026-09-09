@@ -928,6 +928,7 @@ enum class GatewayMethod(
   SessionPublicShareSet("session.publicShare.set"),
   ClawsMonitors("claws.monitors"),
   SessionsRoomCreate("sessions.room.create"),
+  SessionsMessageAppend("sessions.message.append"),
 }
 
 enum class GatewayEvent(

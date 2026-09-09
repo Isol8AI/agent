@@ -29,14 +29,12 @@ import {
 import type { GatewayClient } from "./server-methods/types.js";
 import { prepareSessionCreatorProfile } from "./session-creator.js";
 import {
+  resolveGatewaySessionStoreTargetWithStore,
   resolveGatewaySessionStoreTargetsReadOnly,
   type GatewaySessionStoreCache,
   type GatewaySessionStoreDiscoveryCache,
 } from "./session-utils-store-lookup.js";
-import {
-  resolveCanonicalSessionStoreMatchFromStoreKeys,
-  resolveGatewaySessionStoreTargetWithStore,
-} from "./session-utils.js";
+import { resolveCanonicalSessionStoreMatchFromStoreKeys } from "./session-utils-store.js";
 
 export type SessionSharingTarget = {
   agentId: string;
@@ -98,6 +96,7 @@ export function resolveSessionSharingTarget(params: {
   sessionKey: string;
   agentId?: string;
   exactRead?: boolean;
+  projection?: "full" | "list";
   storeCache?: GatewaySessionStoreCache;
   targetDiscoveryCache?: GatewaySessionStoreDiscoveryCache;
 }): SessionSharingTarget | null {
@@ -106,8 +105,8 @@ export function resolveSessionSharingTarget(params: {
     key: params.sessionKey,
     agentId: params.agentId,
     clone: false,
-    // Authorization includes the persisted private-room execution policy.
-    projection: "full",
+    // Ordinary sharing checks need only metadata; capability gates opt into the policy payload.
+    projection: params.projection ?? "list",
     // Batch callers reuse one store snapshot; single-target checks must not
     // materialize unrelated sessions for every task or authorization recheck.
     exactRead: params.exactRead ?? !params.storeCache,
@@ -124,7 +123,7 @@ export function resolveSessionSharingTargets(params: {
 }): Array<SessionSharingTarget | null> {
   return resolveGatewaySessionStoreTargetsReadOnly({
     cfg: params.cfg,
-    projection: "full",
+    projection: "list",
     targets: params.targets.map(({ sessionKey, agentId }) => ({ key: sessionKey, agentId })),
   }).map(toSessionSharingTarget);
 }
@@ -460,6 +459,20 @@ export function authorizeSessionSharingTarget(params: {
           visibility,
         },
       });
+}
+
+/** Preserve append authorization while hiding private-room existence from denied callers. */
+export function authorizeSessionMessageAppendTarget(
+  params: Parameters<typeof authorizeSessionSharingTarget>[0],
+): ErrorShape | null {
+  const error = authorizeSessionSharingTarget(params);
+  if (!error) {
+    return null;
+  }
+  const visibility = resolveSessionVisibility(params.target.entry);
+  return visibility === "restricted" || visibility === "draft"
+    ? hiddenSessionNotFound(params.target.canonicalKey)
+    : error;
 }
 
 /** Read authorization preserves public visibility semantics and adds explicit restricted ACLs. */
