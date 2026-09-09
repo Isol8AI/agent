@@ -23,6 +23,7 @@ import { emitSessionsChanged } from "./session-change-event.js";
 import { isFreshChatSendStarted } from "./session-create-initial-turn.js";
 import { sessionCreateHandlers } from "./sessions-create.js";
 import { appendSessionMessage } from "./sessions-message-append.js";
+import { dispatchSessionExecution } from "./sessions-execution.js";
 import { isAgentMainSessionKey, requireSessionKey } from "./sessions-shared.js";
 import type {
   GatewayClient,
@@ -278,6 +279,7 @@ async function handleSessionSend(params: {
 
 export const sessionMessagingHandlers: GatewayRequestHandlers = {
   "sessions.message.append": appendSessionMessage,
+  "sessions.execution.dispatch": dispatchSessionExecution,
   "sessions.send": async ({ req, params, respond, context, client, isWebchatConnect }) => {
     await handleSessionSend({
       method: "sessions.send",

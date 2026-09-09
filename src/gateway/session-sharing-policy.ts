@@ -1,3 +1,4 @@
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import {
   ErrorCodes,
   errorShape,
@@ -409,6 +410,15 @@ export function authorizeSessionAgentRun(params: {
     return agentError;
   }
   if (resolveSessionVisibility(params.target.entry) === "restricted") {
+    const execution = getPrivateRoomExecution();
+    if (
+      execution?.sessionKey === params.target.canonicalKey &&
+      execution.sessionId === params.target.entry.sessionId &&
+      execution.agentId === params.target.agentId
+    ) {
+      execution.assertCurrent();
+      return null;
+    }
     return errorShape(
       ErrorCodes.INVALID_REQUEST,
       "private room execution is unavailable until its isolation policy is active",

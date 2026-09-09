@@ -6,6 +6,7 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
 import type { TSchema } from "typebox";
+import { isRestrictedMemorySession } from "./private-room.js";
 import type { MemoryCoreAcquireLocalService } from "./memory/embedding-local-service.js";
 
 export type MemoryToolOptions = {
@@ -66,6 +67,9 @@ function resolveMemorySourceContract(
 export function resolveMemoryToolContext(options: MemoryToolOptions) {
   const cfg = options.getConfig ? options.getConfig() : options.config;
   if (!cfg) {
+    return null;
+  }
+  if (isRestrictedMemorySession({ cfg, agentId: options.agentId, sessionKey: options.agentSessionKey })) {
     return null;
   }
   const agentId = resolveSessionAgentIdStrict({

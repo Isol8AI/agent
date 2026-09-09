@@ -1,5 +1,6 @@
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { getMemoryCapabilityRegistration } from "openclaw/plugin-sdk/memory-host-core";
 import {
   normalizePluginsConfig,
@@ -214,6 +215,18 @@ export default definePluginEntry({
         toolAuthority.assertActive();
         refreshLiveConfigFromRuntime();
         const liveConfig = readCurrentConfig();
+        const roomAgentId = resolveStatusUpdateAgentId(ctx);
+        if (
+          ctx.sessionKey && roomAgentId &&
+          getSessionEntry({
+            agentId: roomAgentId,
+            sessionKey: ctx.sessionKey,
+            storePath: resolveStorePath(liveConfig.session?.store, { agentId: roomAgentId }),
+            readConsistency: "latest",
+          })?.visibility === "restricted"
+        ) {
+          return undefined;
+        }
         // The hook deadline, watchdog, and embedded-run budget all flow from
         // this config, so the CLI-runtime default raise must happen before
         // any of them are armed. Budgeting shares the runner's own dispatch

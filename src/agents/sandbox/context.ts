@@ -4,6 +4,7 @@
  * Prepares workspace layout, backend handle, filesystem bridge, browser bridge, and registry state for one run.
  */
 import fs from "node:fs/promises";
+import { resolvePrivateRoomPolicy } from "../../config/sessions/private-room-policy.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -29,6 +30,7 @@ import { readRegisteredSandboxRuntimeIds, updateRegistry } from "./registry.js";
 import { resolveSandboxRuntimeStatus } from "./runtime-status.js";
 import { assertSshSandboxSecretOwnerAvailable } from "./secret-owner.js";
 import { resolveSandboxWorkspaceLayoutPaths } from "./shared.js";
+import { createPrivateRoomSandbox } from "./private-room.js";
 import type { SandboxContext, SandboxIsolationSubject, SandboxWorkspaceInfo } from "./types.js";
 import { ensureSandboxWorkspace } from "./workspace.js";
 
@@ -393,6 +395,11 @@ export async function resolveSandboxContext(params: {
   skillsSnapshot?: SkillSnapshot;
   workspaceDir?: string;
 }): Promise<SandboxContext | null> {
+  const policy = resolvePrivateRoomPolicy({ cfg: params.config, sessionKey: params.sessionKey, agentId: params.agentId });
+  if (policy) {
+    return await createPrivateRoomSandbox({ policy, sessionKey: params.sessionKey!,
+      cfg: resolveSandboxConfigForAgent(params.config, params.agentId) });
+  }
   const resolved = resolveSandboxSession(params);
   if (!resolved) {
     return null;
@@ -415,6 +422,11 @@ export async function ensureSandboxWorkspaceForSession(params: {
   sessionKey?: string;
   workspaceDir?: string;
 }): Promise<SandboxWorkspaceInfo | null> {
+  const policy = resolvePrivateRoomPolicy({ cfg: params.config, sessionKey: params.sessionKey, agentId: params.agentId });
+  if (policy) {
+    await fs.mkdir(policy.sessionRoot, { recursive: true, mode: 0o700 });
+    return { workspaceDir: policy.sessionRoot, containerWorkdir: policy.sessionRoot, workspaceAccess: "none" };
+  }
   const resolved = resolveSandboxSession(params);
   if (!resolved) {
     return null;

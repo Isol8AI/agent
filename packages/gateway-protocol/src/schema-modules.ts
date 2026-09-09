@@ -46,6 +46,8 @@ export {
 export * from "./schema/sessions-resolve.js";
 export * from "./schema/session-github-publication.js";
 export * from "./schema/sessions-viewer-presence.js";
+export * from "./schema/native-presence.js";
+export * from "./schema/sessions-execution.js";
 export * from "./schema/sessions-sharing.js";
 export * from "./schema/sessions-suggestions.js";
 export * from "./schema/sessions-catalog.js";

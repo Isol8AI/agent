@@ -1,4 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import {
   ErrorCodes,
   errorShape,
@@ -86,7 +87,7 @@ const AGENT_RUN_START_METHODS = new Set([
 
 function requiresPrivateRoomCapability(method: string): boolean {
   // Canonical message persistence has no execution, tool, or delivery capability.
-  if (method === "sessions.message.append") {
+  if (method === "sessions.message.append" || method === "session.typing") {
     return false;
   }
   return (
@@ -108,6 +109,11 @@ function authorizeRestrictedPolicyPlaceholder(
     return null;
   }
   const policy = target.entry.privateRoomExecutionPolicy;
+  const execution = getPrivateRoomExecution();
+  if (method === "agent" && execution?.sessionKey === target.canonicalKey && execution.sessionId === target.entry.sessionId) {
+    execution.assertCurrent();
+    return null;
+  }
   if (
     policy?.allowedCapabilities.includes(method) === true ||
     policy?.allowedCapabilities.includes(`gateway:${method}`) === true

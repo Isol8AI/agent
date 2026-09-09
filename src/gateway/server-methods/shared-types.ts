@@ -344,6 +344,7 @@ type GatewayResidentBridgeContext = {
   sessionViewerPresence?: ReturnType<
     typeof import("../session-viewer-presence.js").createSessionViewerPresenceDeclarations
   >;
+  nativeRoomPresence?: ReturnType<typeof import("../native-room-presence.js").createNativeRoomPresence>;
   notifyPluginMetadataChanged: () => void;
   refreshHealthSnapshot: (opts?: {
     probe?: boolean;

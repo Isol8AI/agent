@@ -1,6 +1,7 @@
 import { resolveSessionAgentIdStrict } from "openclaw/plugin-sdk/agent-scope-runtime";
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
 // Memory Core plugin entrypoint registers its OpenClaw integration.
+import { isRestrictedMemorySession } from "./src/private-room.js";
 import {
   jsonResult,
   type MemoryPluginRuntime,
@@ -288,6 +289,10 @@ export default definePluginEntry({
 
     api.on("before_prompt_build", async (event, ctx) => {
       if (ctx.trigger !== "user") {
+        return undefined;
+      }
+      if (isRestrictedMemorySession({ cfg: (api.runtime.config?.current?.() ?? api.config) as OpenClawConfig,
+        agentId: ctx.agentId, sessionKey: ctx.sessionKey })) {
         return undefined;
       }
       try {

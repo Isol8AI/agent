@@ -9143,6 +9143,180 @@ public struct SessionDiscussionOpenResult: Codable, Sendable {
     }
 }
 
+public struct SessionExecutionDispatchParams: Codable, Sendable {
+    public let sessionkey: String
+    public let expectedsessionid: String
+    public let inputmessageid: String
+    public let idempotencykey: String
+    public let hopcount: Int?
+
+    public init(
+        sessionkey: String,
+        expectedsessionid: String,
+        inputmessageid: String,
+        idempotencykey: String,
+        hopcount: Int? = nil)
+    {
+        self.sessionkey = sessionkey
+        self.expectedsessionid = expectedsessionid
+        self.inputmessageid = inputmessageid
+        self.idempotencykey = idempotencykey
+        self.hopcount = hopcount
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case expectedsessionid = "expectedSessionId"
+        case inputmessageid = "inputMessageId"
+        case idempotencykey = "idempotencyKey"
+        case hopcount = "hopCount"
+    }
+}
+
+public struct NativePresenceEvent: Codable, Sendable {
+    public let roomkey: String
+    public let actor: [String: AnyCodable]
+    public let connectionid: String
+    public let connectionstartedatms: Int
+    public let sequence: Int
+    public let state: AnyCodable
+    public let serverreceivedatms: Int
+    public let expiresatms: Int
+    public let visibility: AnyCodable
+    public let visibilityobservedatms: Int?
+    public let recentinput: AnyCodable
+    public let recentinputobservedatms: Int?
+    public let viewingintent: AnyCodable
+    public let viewingintentreceivedatms: Int?
+    public let authoritativelastseenatms: Int?
+
+    public init(
+        roomkey: String,
+        actor: [String: AnyCodable],
+        connectionid: String,
+        connectionstartedatms: Int,
+        sequence: Int,
+        state: AnyCodable,
+        serverreceivedatms: Int,
+        expiresatms: Int,
+        visibility: AnyCodable,
+        visibilityobservedatms: Int? = nil,
+        recentinput: AnyCodable,
+        recentinputobservedatms: Int? = nil,
+        viewingintent: AnyCodable,
+        viewingintentreceivedatms: Int? = nil,
+        authoritativelastseenatms: Int? = nil)
+    {
+        self.roomkey = roomkey
+        self.actor = actor
+        self.connectionid = connectionid
+        self.connectionstartedatms = connectionstartedatms
+        self.sequence = sequence
+        self.state = state
+        self.serverreceivedatms = serverreceivedatms
+        self.expiresatms = expiresatms
+        self.visibility = visibility
+        self.visibilityobservedatms = visibilityobservedatms
+        self.recentinput = recentinput
+        self.recentinputobservedatms = recentinputobservedatms
+        self.viewingintent = viewingintent
+        self.viewingintentreceivedatms = viewingintentreceivedatms
+        self.authoritativelastseenatms = authoritativelastseenatms
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case roomkey = "roomKey"
+        case actor
+        case connectionid = "connectionId"
+        case connectionstartedatms = "connectionStartedAtMs"
+        case sequence
+        case state
+        case serverreceivedatms = "serverReceivedAtMs"
+        case expiresatms = "expiresAtMs"
+        case visibility
+        case visibilityobservedatms = "visibilityObservedAtMs"
+        case recentinput = "recentInput"
+        case recentinputobservedatms = "recentInputObservedAtMs"
+        case viewingintent = "viewingIntent"
+        case viewingintentreceivedatms = "viewingIntentReceivedAtMs"
+        case authoritativelastseenatms = "authoritativeLastSeenAtMs"
+    }
+}
+
+public struct NativePresenceSnapshot: Codable, Sendable {
+    public let roomkey: String
+    public let inventorystatus: AnyCodable
+    public let servernowatms: Int
+    public let connections: [NativePresenceEvent]
+    public let failurecode: String?
+
+    public init(
+        roomkey: String,
+        inventorystatus: AnyCodable,
+        servernowatms: Int,
+        connections: [NativePresenceEvent],
+        failurecode: String? = nil)
+    {
+        self.roomkey = roomkey
+        self.inventorystatus = inventorystatus
+        self.servernowatms = servernowatms
+        self.connections = connections
+        self.failurecode = failurecode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case roomkey = "roomKey"
+        case inventorystatus = "inventoryStatus"
+        case servernowatms = "serverNowAtMs"
+        case connections
+        case failurecode = "failureCode"
+    }
+}
+
+public struct SessionsPresenceParams: Codable, Sendable {
+    public let sessionkey: String
+    public let agentid: String?
+
+    public init(
+        sessionkey: String,
+        agentid: String? = nil)
+    {
+        self.sessionkey = sessionkey
+        self.agentid = agentid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case agentid = "agentId"
+    }
+}
+
+public struct SessionsPresenceHeartbeatParams: Codable, Sendable {
+    public let sessionkey: String
+    public let agentid: String?
+    public let visibility: AnyCodable?
+    public let recentinput: AnyCodable?
+
+    public init(
+        sessionkey: String,
+        agentid: String? = nil,
+        visibility: AnyCodable? = nil,
+        recentinput: AnyCodable? = nil)
+    {
+        self.sessionkey = sessionkey
+        self.agentid = agentid
+        self.visibility = visibility
+        self.recentinput = recentinput
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case agentid = "agentId"
+        case visibility
+        case recentinput = "recentInput"
+    }
+}
+
 public struct SessionsGoalClearParams: Codable, Sendable {
     public let sessionkey: String
     public let agentid: String?

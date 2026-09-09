@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { privateRoomExecutionForRun } from "../../agents/private-room-execution.js";
 import {
   ErrorCodes,
   errorShape,
@@ -139,6 +140,13 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
         !isSessionMember(scope, identity)
       ) {
         reject("message append requires room membership");
+      }
+      if (runtime && current.entry.visibility === "restricted") {
+        const execution = privateRoomExecutionForRun(runtime.operationalRunInstance);
+        if (!execution || execution.sessionId !== scope.sessionId || execution.sessionKey !== current.canonicalKey ||
+            runtime.sessionKey !== current.canonicalKey) {
+          reject("private room result requires the exact authenticated execution");
+        }
       }
       if (
         request.replyToId &&

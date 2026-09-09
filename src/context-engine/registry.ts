@@ -1,5 +1,6 @@
 // Context-engine registry owns engine registration, resolution, compatibility, and quarantine.
 import { sanitizeForLog } from "../../packages/terminal-core/src/ansi.js";
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type {
   ContextEngineFactory,
@@ -636,9 +637,13 @@ export async function resolveLogicalTurnContextEngines(
     agentDir: options?.agentDir,
     workspaceDir: options?.workspaceDir,
   };
+
+  // Private v1 admits only the core transcript engine; plugin corpora have no room ACL.
+  const privateExecution = getPrivateRoomExecution();
+  privateExecution?.assertCurrent();
   const fallback = await resolveRawContextEngineRef(defaultEngineId, factoryCtx);
-  if (configuredEngineId === defaultEngineId) {
-    return { configured: fallback, configuredId: configuredEngineId, fallback };
+  if (privateExecution || configuredEngineId === defaultEngineId) {
+    return { configured: fallback, configuredId: defaultEngineId, fallback };
   }
   const entry = getContextEngines().get(configuredEngineId);
   if (!entry) {
@@ -707,6 +712,11 @@ export async function resolveContextEngine(
   };
 
   const quarantine = !isDefaultEngine ? getContextEngineQuarantine(engineId) : undefined;
+  const privateExecution = getPrivateRoomExecution();
+  if (privateExecution) {
+    privateExecution.assertCurrent();
+    return resolveDefaultContextEngine(defaultEngineId, factoryCtx);
+  }
   if (quarantine) {
     // Previously failed custom engines stay downgraded until explicit quarantine clear/restart.
     return resolveDefaultContextEngine(defaultEngineId, factoryCtx);

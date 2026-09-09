@@ -49,6 +49,7 @@ export const GATEWAY_EVENTS = [
   "session.sharing.evidence",
   "session.suggestion",
   "session.typing",
+  "session.presence",
   "session.tool",
   "sessions.changed",
   "controlUi.sessionPullRequests.changed",

@@ -9,6 +9,7 @@ import { setPluginToolMeta } from "../../../plugins/tool-metadata.js";
 import { materializeBundleMcpToolsForRun } from "../../agent-bundle-mcp-materialize.js";
 import type { McpToolCatalog, SessionMcpRuntime } from "../../agent-bundle-mcp-types.js";
 import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
+import { withPrivateRoomExecution } from "../../private-room-execution.js";
 import { createAgentCleanupScope } from "../../run-cleanup-timeout.js";
 import { createStubTool } from "../../test-helpers/agent-tool-stubs.js";
 import { attachToolAllowlistIntersection } from "../../tool-policy.js";
@@ -59,6 +60,30 @@ import { createAttemptSetupFixture } from "./attempt-setup.test-support.js";
 import { prepareEmbeddedAttemptToolCatalog } from "./attempt-tool-catalog.js";
 
 describe("prepareEmbeddedAttemptBundleTools", () => {
+  it("does not acquire external MCP or LSP runtimes for a private execution", async () => {
+    const input = createInput([], []);
+    const result = await withPrivateRoomExecution(
+      {
+        agentId: "main",
+        rootExecutionId: "root",
+        runId: "run",
+        hopCount: 0,
+        sessionKey: "agent:main:room",
+        sessionId: "room",
+        inputMessageId: "input",
+        assertCurrent: () => {},
+        close: () => {},
+      },
+      () => prepareEmbeddedAttemptBundleTools(
+        input as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0],
+      ),
+    );
+    expect(result.bundleMcpRuntime).toBeUndefined();
+    expect(result.bundleLspRuntime).toBeUndefined();
+    expect(mocks.acquireSessionMcpRuntime).not.toHaveBeenCalled();
+    expect(mocks.createBundleLspToolRuntime).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.createBundleLspToolRuntime.mockReset().mockResolvedValue(undefined);

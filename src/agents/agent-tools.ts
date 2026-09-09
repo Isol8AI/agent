@@ -13,6 +13,7 @@ import type { ThinkLevel } from "../auto-reply/thinking.shared.js";
 import type { ChatType } from "../channels/chat-type.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import type { ModelCompatConfig } from "../config/types.models.js";
+import { resolvePrivateRoomPolicy } from "../config/sessions/private-room-policy.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GroupToolPolicyConfig } from "../config/types.tools.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
@@ -34,6 +35,7 @@ import type { SkillSnapshot, SkillUsagePath } from "../skills/types.js";
 import type { SkillWorkshopRunOptions } from "../skills/workshop/types.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import type { OperationalRunInstanceRef } from "./admitted-run-context.js";
+import { getPrivateRoomExecution } from "./private-room-execution.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import {
   bindAssembledAgentToolActionDescriptor,
@@ -416,6 +418,14 @@ type OpenClawCodingToolsOptions = {
 
 function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions): AnyAgentTool[] {
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
+  const privatePolicy = resolvePrivateRoomPolicy({ cfg: options?.config,
+    sessionKey: options?.runSessionKey ?? options?.sessionKey, agentId: options?.agentId });
+  if (privatePolicy && (!sandbox?.required || sandbox.backendId !== "private-room-files-v1" ||
+      sandbox.workspaceDir !== privatePolicy.sessionRoot || sandbox.workspaceAccess !== "none")) {
+    throw new Error("Private room tools require the exact room sandbox");
+  }
+  const privateExecution = privatePolicy ? getPrivateRoomExecution() : undefined;
+  if (privatePolicy && !privateExecution) { throw new Error("Private room tools require a live admitted execution"); }
   const isMemoryFlushRun = options?.trigger === "memory";
   if (isMemoryFlushRun && !options?.memoryFlushWritePath) {
     throw new Error("memoryFlushWritePath required for memory-triggered tool runs");
@@ -491,7 +501,7 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
   const forceHeartbeatTool = options?.forceHeartbeatTool === true || enableHeartbeatTool;
   const toolSearchConfig = resolveToolSearchConfig(options?.config);
   const toolSearchControlsEnabled =
-    options?.includeToolSearchControls === true && toolSearchConfig.enabled;
+    !privatePolicy && options?.includeToolSearchControls === true && toolSearchConfig.enabled;
   const toolSearchControlAllowlist = toolSearchControlsEnabled
     ? [
         TOOL_SEARCH_CODE_MODE_TOOL_NAME,
@@ -607,11 +617,12 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     includePluginTools: true,
   };
   const includeBaseCodingTools = includeCoreTools && toolConstructionPlan.includeBaseCodingTools;
-  const includeShellTools = includeCoreTools && toolConstructionPlan.includeShellTools;
-  const includeOpenClawTools = includeCoreTools && toolConstructionPlan.includeOpenClawTools;
-  const includeChannelTools = toolConstructionPlan.includeChannelTools;
-  const includePluginTools = toolConstructionPlan.includePluginTools;
+  const includeShellTools = !privatePolicy && includeCoreTools && toolConstructionPlan.includeShellTools;
+  const includeOpenClawTools = !privatePolicy && includeCoreTools && toolConstructionPlan.includeOpenClawTools;
+  const includeChannelTools = !privatePolicy && toolConstructionPlan.includeChannelTools;
+  const includePluginTools = !privatePolicy && toolConstructionPlan.includePluginTools;
   const workspaceOnly =
+    Boolean(privatePolicy) ||
     options?.requireWorkspaceOnly === true ||
     isMemoryFlushRun ||
     (sessionCoreToolPolicy?.workspaceOnly ?? fsConfig.workspaceOnly === true);
@@ -655,8 +666,8 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     workspaceOnly,
     readOnly,
     sandbox,
-    skillsSnapshot: options?.skillsSnapshot,
-    skillInstructionPaths: options?.skillUsagePaths?.map((entry) => entry.readPath),
+    skillsSnapshot: privatePolicy ? undefined : options?.skillsSnapshot,
+    skillInstructionPaths: privatePolicy ? undefined : options?.skillUsagePaths?.map((entry) => entry.readPath),
     skillInstructionDeliveryCache: options?.skillInstructionDeliveryCache,
     modelContextWindowTokens: options?.modelContextWindowTokens,
     imageSanitization,
@@ -1062,10 +1073,18 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
   );
   if (
     swarmStructuredOutputTool &&
+    !privatePolicy &&
     !authorizedTools.some((tool) => tool.name === swarmStructuredOutputTool.name)
   ) {
     // Collector output is a run contract, not an operator-configurable capability.
     authorizedTools.push(swarmStructuredOutputTool);
+  }
+  if (privatePolicy) {
+    for (let index = authorizedTools.length - 1; index >= 0; index--) {
+      if (!privatePolicy.allowedCapabilities.includes(`tool:${authorizedTools[index].name}`)) {
+        authorizedTools.splice(index, 1);
+      }
+    }
   }
   authorizedTools.forEach(bindAssembledAgentToolActionDescriptor);
   processToolAvailabilityRef.value = authorizedTools.some((tool) => tool.name === "process");
@@ -1126,7 +1145,16 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     ...(options?.swarmCollector ? { approvalMode: "deny" as const } : {}),
     abortSignal: options?.abortSignal,
     recordToolPrepStage: options?.recordToolPrepStage,
-  }).map((tool) => wrapToolWithGatewayCallerIdentity(tool, toolCallerIdentity));
+  }).map((tool) => {
+    const bound = wrapToolWithGatewayCallerIdentity(tool, toolCallerIdentity);
+    if (!privateExecution) { return bound; }
+    return copyAgentToolMetadata(bound, { ...bound, execute: async (...args: Parameters<AnyAgentTool["execute"]>) => {
+      privateExecution.assertCurrent();
+      const result = await bound.execute(...args);
+      privateExecution.assertCurrent();
+      return result;
+    } });
+  });
 }
 
 /** Build the runtime tool list exposed through the public agent harness SDK. */

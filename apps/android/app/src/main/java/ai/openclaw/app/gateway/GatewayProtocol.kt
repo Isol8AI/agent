@@ -929,6 +929,11 @@ enum class GatewayMethod(
   ClawsMonitors("claws.monitors"),
   SessionsRoomCreate("sessions.room.create"),
   SessionsMessageAppend("sessions.message.append"),
+  SessionsExecutionDispatch("sessions.execution.dispatch"),
+  SessionsPresenceHeartbeat("sessions.presence.heartbeat"),
+  SessionsPresenceSnapshot("sessions.presence.snapshot"),
+  SessionsPresenceSubscribe("sessions.presence.subscribe"),
+  SessionsPresenceUnsubscribe("sessions.presence.unsubscribe"),
 }
 
 enum class GatewayEvent(
@@ -947,6 +952,7 @@ enum class GatewayEvent(
   SessionSharingEvidence("session.sharing.evidence"),
   SessionSuggestion("session.suggestion"),
   SessionTyping("session.typing"),
+  SessionPresence("session.presence"),
   SessionTool("session.tool"),
   SessionsChanged("sessions.changed"),
   ControlUiSessionPullRequestsChanged("controlUi.sessionPullRequests.changed"),

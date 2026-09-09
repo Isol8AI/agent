@@ -9,6 +9,7 @@ import {
   resolveContextInjectionMode,
 } from "../../bootstrap-files.js";
 import { isHeartbeatLifecycleRunKind } from "../../bootstrap-mode.js";
+import { getPrivateRoomExecution } from "../../private-room-execution.js";
 import {
   isPrimaryBootstrapRun,
   resolveWorkspaceBootstrapRouting,
@@ -40,7 +41,9 @@ export async function prepareEmbeddedAttemptBootstrap(params: {
       ? params.setup.effectiveWorkspace
       : bootstrapWorkspaceDir;
   const suppressAmbientContext =
-    params.isRawModelRun || attempt.operation === "settled-tool-finalization";
+    Boolean(getPrivateRoomExecution()) ||
+    params.isRawModelRun ||
+    attempt.operation === "settled-tool-finalization";
   const contextInjectionMode = resolveContextInjectionMode(
     attempt.config,
     params.setup.sessionAgentId,

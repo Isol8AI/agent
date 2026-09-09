@@ -6,6 +6,7 @@ import {
   applySkillEnvOverridesFromSnapshot,
 } from "../../skills/runtime/env-overrides.js";
 import { resolveCodeModeSkills, type CodeModeSkillReader } from "../code-mode-skills.js";
+import { getPrivateRoomExecution } from "../private-room-execution.js";
 import type { SandboxContext } from "../sandbox/types.js";
 import { isToolExecutionAllowed } from "../tool-policy-shared.js";
 import type { EmbeddedRunAttemptParams } from "./run/types.js";
@@ -36,6 +37,7 @@ export function prepareEmbeddedSkills(params: {
   // Retained schemas are not execution permission. An unreadable skill catalog
   // creates impossible prerequisites and exposes an ungated Code Mode reader.
   if (
+    getPrivateRoomExecution() ||
     params.attempt.operation === "settled-tool-finalization" ||
     (executionAllow && !isToolExecutionAllowed(executionAllow, "read"))
   ) {

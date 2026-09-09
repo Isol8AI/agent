@@ -12,6 +12,7 @@ import { applyTranscriptSenderIdentityToWrite } from "../../sessions/user-turn-t
 import { extractAssistantPhaseText } from "../../shared/chat-message-content.js";
 import { consumeAdjustedParamsForToolCall } from "../agent-tools.before-tool-call.js";
 import type { AgentMessage } from "../runtime/index.js";
+import { stampPrivateRoomAssistant } from "../private-room-execution.js";
 
 const log = createSubsystemLogger("agents/harness");
 
@@ -83,7 +84,7 @@ export function runAgentHarnessBeforeMessageWriteHook(params: {
       ? extractAssistantPhaseText(params.message)
       : undefined;
   const hookRunner = getGlobalHookRunner();
-  const message =
+  const message = stampPrivateRoomAssistant(
     !params.skipBeforeMessageWriteHooks && hookRunner?.hasHooks("before_message_write")
       ? (applyTranscriptSenderIdentityToWrite(params.message, () => {
           const result = hookRunner.runBeforeMessageWrite(
@@ -92,7 +93,7 @@ export function runAgentHarnessBeforeMessageWriteHook(params: {
           );
           return result?.block ? null : (result?.message ?? params.message);
         }) ?? null)
-      : params.message;
+      : params.message);
   return message?.role === "assistant" &&
     Reflect.get(message, "display") !== false &&
     sourceText !== undefined &&

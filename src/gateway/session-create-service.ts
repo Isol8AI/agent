@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { stableStringify } from "@openclaw/normalization-core";
+import { PRIVATE_ROOM_CAPABILITIES } from "../config/sessions/private-room-policy.js";
 import {
   type FastMode,
   normalizeOptionalLowercaseString,
@@ -1396,7 +1397,7 @@ export async function createGatewaySession(params: {
                 workspaceAccess: "none",
                 sessionRoot: privateRoomSessionRoot,
                 toolPolicyVersion: "private-room-v1",
-                allowedCapabilities: [],
+                allowedCapabilities: [...PRIVATE_ROOM_CAPABILITIES],
               }
             : undefined;
         const initializedEntry: InternalSessionEntry = {

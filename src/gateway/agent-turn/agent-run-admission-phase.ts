@@ -1,4 +1,6 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { getPrivateRoomExecution } from "../../agents/private-room-execution.js";
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import {
   createOperationalRunInstanceRef,
@@ -225,6 +227,9 @@ export async function prepareAgentRunDispatch(params: {
     model: activeModel.model,
   };
   const activeModelProvider = activeModel.provider;
+  if (getPrivateRoomExecution() && resolvedRuntime.harness !== "openclaw") {
+    throw new Error("Private room execution requires the capability-restricted OpenClaw runtime");
+  }
   const lifecycleStorePath = params.resolvedSessionKey
     ? loadSessionEntry(params.resolvedSessionKey, {
         ...(params.activeSessionAgentId ? { agentId: params.activeSessionAgentId } : {}),
@@ -341,7 +346,7 @@ export async function prepareAgentRunDispatch(params: {
     params.io.emitStartOwner?.(params.runId, activeRunAbort.entry);
   }
 
-  const workspaceOverride = resolveIngressWorkspaceOverrideForSessionRun({
+  const workspaceOverride = privateRoomPolicyForEntry(params.sessionEntry)?.sessionRoot ?? resolveIngressWorkspaceOverrideForSessionRun({
     spawnedBy: params.sessionEntry?.spawnedBy,
     workspaceDir: params.sessionEntry?.spawnedWorkspaceDir,
     cwd: params.sessionEntry?.spawnedCwd,

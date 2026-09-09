@@ -122,6 +122,22 @@ describe("session transcript archive discovery", () => {
 });
 
 describe("listSessionTranscriptCorpusEntriesForAgent", () => {
+  it("excludes restricted room transcripts from the global indexing and dreaming corpus", async () => {
+    const scope = { agentId: "main", sessionKey: "agent:main:room", sessionId: "private-room" };
+    await upsertSessionEntryCore(scope, {
+      sessionId: scope.sessionId,
+      updatedAt: 1,
+      visibility: "restricted",
+    });
+    await appendTranscriptMessage(scope, {
+      message: { role: "user", content: "Never promote this room into global memory" },
+    });
+    await expect(listSessionTranscriptCorpusEntriesForAgent("main")).resolves.toEqual([]);
+    await expect(
+      listSessionTranscriptCorpusEntriesForAgent("main", { includeRetainedSqlite: true }),
+    ).resolves.toEqual([]);
+  });
+
   it("surfaces unexpected archive-directory scan failures", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     fsSync.mkdirSync(sessionsDir, { recursive: true });

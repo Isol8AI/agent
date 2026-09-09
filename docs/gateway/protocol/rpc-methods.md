@@ -13,6 +13,36 @@ The gateway method surface, grouped into families, plus the session list bootstr
 
 ## RPC method families
 
+### Private room execution
+
+`sessions.message.append` persists an authenticated contribution without inference.
+`sessions.execution.dispatch` is the separate optional transition into the existing
+execution admission and billing path. It accepts `sessionKey`, `expectedSessionId`,
+the committed human `inputMessageId`, and `idempotencyKey`. An optional `hopCount`
+must match the authenticated execution ancestry; clients cannot author a root
+execution ID or replace the committed text. More than three delegation hops are
+rejected before new work. Accepted replies include `persisted`, `executionAccepted`,
+`inputMessageId`, the server-derived `rootExecutionId`, and `hopCount`. Admission or
+model failure does not roll back the contribution.
+
+Private v1 executes the room-owning agent using the immutable exact-session policy.
+Membership, active session instance, committed input, and live run ownership are
+rechecked at dispatch, file/tool boundaries, and result append. Membership removal
+revokes subscriptions and presence and aborts the associated live work. Assistant
+result identity is stamped from the admitted runtime, not from model output.
+
+The required sandbox is a capability-restricted, file-only context inside the
+founder container. Its only filesystem is the unique room root, mediated by the
+existing pinned filesystem bridge; it never provisions a room container or mounts
+the founder workspace. The default tool allowlist contains only `read`, `write`,
+`edit`, and `apply_patch`, still intersected with ordinary runtime policy.
+`sessions.files.list/get/set/reveal` use that same root and native room ACL.
+Global memory, ambient bootstrap/skill context, custom context engines, external
+MCP/LSP, browser/shell, generic messaging, and cross-session tools are excluded.
+Unsupported future capabilities fail closed: this backend is not an OS process
+sandbox and cannot satisfy a shell or browser policy. Existing immutable policies
+are not silently upgraded when the default changes.
+
 `hello-ok.features.methods` is a conservative discovery list built from
 `src/gateway/server-methods-list.ts` plus loaded plugin/channel method
 exports — it is not a generated dump of every method, and some methods (for

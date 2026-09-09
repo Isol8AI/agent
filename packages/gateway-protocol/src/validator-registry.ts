@@ -19,6 +19,9 @@ export {
 
 // Validator names mirror schemas so callers can pair them with wire contracts.
 export const validateCommandsListParams = compile(S.CommandsListParamsSchema);
+export const validateSessionExecutionDispatchParams = compile(S.SessionExecutionDispatchParamsSchema);
+export const validateSessionsPresenceParams = compile(S.SessionsPresenceParamsSchema);
+export const validateSessionsPresenceHeartbeatParams = compile(S.SessionsPresenceHeartbeatParamsSchema);
 export const validateCanvasDocumentViewParams = compile(S.CanvasDocumentViewParamsSchema);
 export const validateConnectParams = compile(S.ConnectParamsSchema);
 export const validateWorkerAdmissionHandshake = compile(S.WorkerAdmissionHandshakeSchema);

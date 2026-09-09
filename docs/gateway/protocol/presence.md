@@ -12,6 +12,49 @@ How the Gateway reports which nodes are connected, and which server-pushed event
 
 ## Presence
 
+### Native room presence v1
+
+Room presence is separate from device presence and participant history. Authenticated
+profile WebSockets use `sessions.presence.heartbeat`, `sessions.presence.snapshot`,
+`sessions.presence.subscribe`, and `sessions.presence.unsubscribe`; incremental
+delivery uses `session.presence`. Each method targets `sessionKey` and may include
+`agentId`. Current room membership and the exact session instance authorize both
+the request and later delivery. Agent presence comes from the admitted runtime,
+never from model-generated text.
+
+Opening a room explicitly sets `sessions.viewers.set` viewing intent and subscribes
+to its event feeds. These are independent operations: subscribing does not imply
+viewing, visibility, recent input, or availability. Heartbeats may submit only
+bounded `visibility` and `recentInput` intents; `session.typing` submits typing
+intent. No client timestamps, sequence, connection ID, or last-seen fields are accepted.
+
+The v1 event carries `roomKey`, typed `actor`, `connectionId`,
+`connectionStartedAtMs`, `sequence`, `state`, `serverReceivedAtMs`, `expiresAtMs`,
+`visibility`, `recentInput`, and `viewingIntent`. Optional server evidence fields
+are `visibilityObservedAtMs`, `recentInputObservedAtMs`,
+`viewingIntentReceivedAtMs`, and `authoritativeLastSeenAtMs`. All times are finite
+integer Unix epoch milliseconds. A snapshot carries `roomKey`, `inventoryStatus`
+(`complete`, `incomplete`, or `failed`), `serverNowAtMs`, `connections`, and optional
+`failureCode`.
+
+Heartbeats run every 30 seconds; connection leases expire after 90 seconds. Recent
+input ages after five minutes. Typing refreshes are throttled to one per second,
+expire after 2.5 seconds, and never extend the connection lease. Only visible,
+recent-input, viewing connections project `online`; missing evidence stays
+`unknown`. Simultaneous connections aggregate independently. Each reconnect gets a
+new server connection ID and sequence starting at one. Last seen advances only
+when the final authorized connection disconnects gracefully, expires, or is revoked.
+
+Consumers order only within a connection and ignore stale sequences. A complete
+snapshot reconciles omissions; incomplete or failed snapshots cannot remove an
+omitted connection. The protocol package's reconciliation helpers preserve these
+inventory statuses and invalidate malformed evidence without poisoning ordering.
+Expiry may be future-dated only within its server-derived 90-second connection or
+2.5-second typing bound. Calculate age from `serverNowAtMs` plus monotonic elapsed
+time, never the browser wall clock.
+
+### Device presence
+
 - `system-presence` returns entries keyed by device identity, including
   `deviceId`, `roles`, and `scopes`, so UIs can show one row per device even
   when it connects as both operator and node.

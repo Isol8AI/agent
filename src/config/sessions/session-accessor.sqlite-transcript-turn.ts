@@ -1,4 +1,5 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { assertPrivateRoomExecutionTarget } from "../../agents/private-room-execution.js";
 import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { ensureSessionGoalOperationsSchema } from "../../state/openclaw-agent-goal-operations-schema.js";
 import {
@@ -145,6 +146,7 @@ export async function appendExpectedSessionTranscriptTurn(
       options.sessionFile,
     );
     const publish = runOpenClawAgentWriteTransaction((transactionDb) => {
+      assertPrivateRoomExecutionTarget(resolved);
       mutation?.assertCurrent?.();
       const fresh = readSessionEntryRow(transactionDb, resolved.sessionKey);
       const replay = mutation

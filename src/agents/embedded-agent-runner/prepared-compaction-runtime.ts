@@ -4,6 +4,7 @@
  */
 import fs from "node:fs/promises";
 import os from "node:os";
+import { getPrivateRoomExecution } from "../private-room-execution.js";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import {
   formatActiveNodeContextLabel,
@@ -161,7 +162,7 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
     const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
     const contextInjectionMode = resolveContextInjectionMode(params.config, sessionAgentId);
     const { contextFiles } =
-      contextInjectionMode === "never"
+      getPrivateRoomExecution() || contextInjectionMode === "never"
         ? { contextFiles: [] }
         : await resolveBootstrapContextForRun({
             workspaceDir: effectiveWorkspace,
@@ -335,14 +336,14 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       [...normalizableToolProjection.tools],
       runtimePlanModelContext,
     );
-    bundleMcpRuntime = toolsEnabled
+    bundleMcpRuntime = toolsEnabled && !getPrivateRoomExecution()
       ? await createBundleMcpToolRuntime({
           workspaceDir: effectiveWorkspace,
           cfg: params.config,
           reservedToolNames: tools.map((tool) => tool.name),
         })
       : undefined;
-    bundleLspRuntime = toolsEnabled
+    bundleLspRuntime = toolsEnabled && !getPrivateRoomExecution()
       ? await createBundleLspToolRuntime({
           workspaceDir: effectiveWorkspace,
           cfg: params.config,

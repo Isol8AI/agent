@@ -8,6 +8,7 @@ import {
   validateSessionsViewerPresenceSetParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
+import { prepareNativeRoomPresenceAuthority } from "../native-room-presence-authority.js";
 import { canReviewOperatorApproval } from "../operator-approval-authorization.js";
 import { APPROVALS_SCOPE } from "../operator-scopes.js";
 import { sessionObserverScopeKey } from "../session-observer-model.js";
@@ -15,11 +16,13 @@ import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveSessionSubscriptionKey } from "../session-subscription-keys.js";
 import { resolveSessionStoreKey } from "../session-utils.js";
 import { sessionsListHandler } from "./sessions-read.js";
+import { nativePresenceHandlers } from "./sessions-presence.js";
 import { requireSessionKey } from "./sessions-shared.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
 export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
+  ...nativePresenceHandlers,
   "sessions.subscribe": async (options) => {
     const { client, context, params, respond } = options;
     if (!assertValidParams(params, validateSessionsListParams, "sessions.subscribe", respond)) {
@@ -93,6 +96,21 @@ export const sessionSubscriptionHandlers: GatewayRequestHandlers = {
       canonicalKeys.push(sessionObserverScopeKey(canonicalKey, requested.agentId));
     }
     const sessionKeys = declarations.replace(connId, canonicalKeys);
+    if (context.nativeRoomPresence) {
+      for (const sessionKey of sessionKeys) {
+        const prepared = prepareNativeRoomPresenceAuthority({
+          client,
+          getConfig: context.getRuntimeConfig,
+          sessionKey,
+        });
+        if (prepared) {
+          context.nativeRoomPresence.update(connId, prepared.roomKey, prepared.authority, {
+            viewingIntent: "viewing",
+          });
+        }
+      }
+      context.nativeRoomPresence.clearViewing(connId, new Set(sessionKeys));
+    }
     respond(true, { sessionKeys }, undefined);
   },
   "sessions.messages.subscribe": ({ params, client, context, respond }) => {

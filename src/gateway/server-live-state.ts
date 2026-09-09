@@ -3,6 +3,7 @@
 import type { PluginServicesHandle } from "../plugins/services.js";
 import type { createControlUiSessionPullRequestSubscriptions } from "./control-ui-session-pr-subscriptions.js";
 import type { HooksConfigResolved } from "./hooks.js";
+import type { createNativeRoomPresence } from "./native-room-presence.js";
 import type { GatewayCronState } from "./server-cron.js";
 import {
   createGatewayServerMutableState,
@@ -18,6 +19,7 @@ export type GatewayServerLiveState = GatewayServerMutableState & {
   cronState: GatewayCronState;
   controlUiSessionPullRequests?: ReturnType<typeof createControlUiSessionPullRequestSubscriptions>;
   sessionViewerPresence?: ReturnType<typeof createSessionViewerPresenceDeclarations>;
+  nativeRoomPresence?: ReturnType<typeof createNativeRoomPresence>;
   pluginServices: PluginServicesHandle | null;
   gatewayMethods: string[];
 };

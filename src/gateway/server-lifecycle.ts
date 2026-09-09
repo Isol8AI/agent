@@ -23,6 +23,7 @@ import type { RestartRecoveryCandidate } from "./chat-abort.js";
 import { createControlUiSessionPullRequestSubscriptions } from "./control-ui-session-pr-subscriptions.js";
 import { retireDeviceTokenClients } from "./device-token-client-lifecycle.js";
 import { STARTUP_UNAVAILABLE_GATEWAY_METHODS } from "./methods/core-descriptors.js";
+import { createNativeRoomPresence } from "./native-room-presence.js";
 import { disposeNodeConnectionNotifications } from "./node-connection-notifications.js";
 import { clearNodeWakeState } from "./node-wake-state.js";
 import { createLazyGatewayCronState } from "./server-cron-lazy.js";
@@ -350,6 +351,14 @@ export async function prepareGatewayLifecycle(params: {
     incrementPresenceVersion,
     getHealthVersion,
   });
+  runtimeState.nativeRoomPresence = createNativeRoomPresence({
+    emit: (event, recipients) =>
+      broadcastToConnIds("session.presence", event, recipients, {
+        dropIfSlow: true,
+        sessionKeys: [event.roomKey],
+        sessionSubscriptionVerified: true,
+      }),
+  });
   deps.cron = runtimeState.cronState.cron;
   const pluginHostServices = {
     get cron() {
@@ -415,6 +424,7 @@ export async function prepareGatewayLifecycle(params: {
     void runtimeState.stopGatewayUpdateCheck().catch(() => {});
     void runtimeState.controlUiSessionPullRequests?.stop();
     runtimeState.sessionViewerPresence?.stop();
+    runtimeState.nativeRoomPresence?.stop();
     kernel.setDispatchReady(false);
     gatewayInstanceRuntimeRef.current?.close();
     cronReconciliation.invalidate();

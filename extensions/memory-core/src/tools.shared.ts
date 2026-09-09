@@ -76,15 +76,18 @@ export function createMemoryTool(params: {
     description: params.contract.describe(ctx.sources),
     parameters: params.contract.parameters,
     execute: async (toolCallId, toolParams, signal, onUpdate) => {
-      const latestCtx = params.options.getConfig ? resolveMemoryToolContext(params.options) : ctx;
-      // A live getter makes missing or disabled current config a revocation.
-      // The captured context is valid only for fixed-snapshot callers.
+      const latestCtx = resolveMemoryToolContext(params.options);
+      // Both configuration and exact-session privacy are live execution boundaries.
       if (!latestCtx) {
         throw new Error(
           "Memory is disabled for this agent. Enable memory search for this agent, then retry.",
         );
       }
-      return await params.execute(latestCtx)(toolCallId, toolParams, signal, onUpdate);
+      const result = await params.execute(latestCtx)(toolCallId, toolParams, signal, onUpdate);
+      if (!resolveMemoryToolContext(params.options)) {
+        throw new Error("Memory access was revoked");
+      }
+      return result;
     },
   };
 }

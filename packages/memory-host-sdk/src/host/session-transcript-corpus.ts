@@ -357,14 +357,23 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     readOnly: options.readOnly === true,
     storePath,
   });
-  const retainedInstances = options.includeRetainedSqlite
-    ? listSessionTranscriptInstances({
-        agentId: normalizedAgentId,
-        hydrateSkillPromptRefs: false,
-        readConsistency: "latest",
-        storePath,
-      })
-    : [];
+  // Retained policy metadata also fences archive artifacts after room deletion.
+  const retainedInstances = listSessionTranscriptInstances({
+    agentId: normalizedAgentId,
+    hydrateSkillPromptRefs: false,
+    readConsistency: "latest",
+    storePath,
+  });
+  const privateSessionIds = new Set(
+    [
+      ...sessionEntries
+        .filter(({ entry }) => entry.visibility === "restricted")
+        .map(({ entry }) => entry.sessionId),
+      ...retainedInstances
+        .filter(({ entry }) => entry.visibility === "restricted")
+        .map(({ sessionId }) => sessionId),
+    ],
+  );
   const artifactPaths: string[] = [];
   const scannedArtifactPaths = new Set<string>();
   for (const artifactDir of artifactDirsByPath.values()) {
@@ -388,6 +397,9 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     ...sessionEntries,
   ]);
   for (const summary of sessionEntries) {
+    if (privateSessionIds.has(summary.entry.sessionId)) {
+      continue;
+    }
     const sessionKey = isSharedFixedStore
       ? summary.sessionKey
       : canonicalizeMainSessionAlias({
@@ -419,6 +431,9 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
   const corpusEntries = [...activeEntriesBySessionId.values()];
   if (options.includeRetainedSqlite) {
     for (const instance of retainedInstances) {
+      if (privateSessionIds.has(instance.sessionId)) {
+        continue;
+      }
       if (activeEntriesBySessionId.has(instance.sessionId)) {
         continue;
       }
@@ -455,7 +470,7 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     const archivedIdentity = archivedIdentitiesByName.get(artifactName);
     const primarySessionId =
       archivedIdentity?.sessionId ?? parseUsageCountedSessionIdFromFileName(artifactName);
-    if (!primarySessionId) {
+    if (!primarySessionId || privateSessionIds.has(primarySessionId)) {
       continue;
     }
     const primaryEntry = activeEntriesBySessionId.get(primarySessionId);

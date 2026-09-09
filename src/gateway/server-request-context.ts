@@ -105,7 +105,7 @@ type GatewayRequestContextRuntime = Pick<
     connectionWork: Pick<GatewayCoreRuntime["connectionWork"], "track">;
     runtimeState: Pick<
       GatewayCoreRuntime["runtimeState"],
-      "cronState" | "controlUiSessionPullRequests" | "sessionViewerPresence"
+      "cronState" | "controlUiSessionPullRequests" | "sessionViewerPresence" | "nativeRoomPresence"
     > & {
       configReloader: Pick<
         GatewayCoreRuntime["runtimeState"]["configReloader"],
@@ -255,6 +255,7 @@ export function createGatewayRequestContext(
       : undefined,
     controlUiSessionPullRequests: runtimeState.controlUiSessionPullRequests,
     sessionViewerPresence: runtimeState.sessionViewerPresence,
+    nativeRoomPresence: runtimeState.nativeRoomPresence,
     sessionCompanion: runtime.sessionCompanion,
     sessionObserver,
     mentionInbox: runtime.mentionInbox,
