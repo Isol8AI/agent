@@ -5,10 +5,7 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import type { RespondFn } from "./types.js";
 
-export function validate(
-  params: SessionsCreateParams,
-  respond: RespondFn,
-): boolean | null {
+export function validate(params: SessionsCreateParams, respond: RespondFn): boolean | null {
   const restricted =
     params.visibility === "restricted" ||
     params.roomKind !== undefined ||
