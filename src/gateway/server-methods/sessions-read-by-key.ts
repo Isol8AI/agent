@@ -47,6 +47,35 @@ function canReadLoadedEntry(params: {
   });
 }
 
+function filterReadableChildSessions(params: {
+  childSessions: string[] | undefined;
+  client: Parameters<typeof hasOperatorBoundary>[0];
+  cfg: Parameters<typeof hasOperatorBoundary>[1];
+}): string[] | undefined {
+  const readable = params.childSessions?.filter((key) => {
+    const requestedAgent = resolveRequestedSessionAgentId(params.cfg, key);
+    if (!requestedAgent.ok) {
+      return false;
+    }
+    const child = loadSessionEntriesForTarget({
+      key,
+      cfg: params.cfg,
+      agentId: requestedAgent.agentId,
+    });
+    return Boolean(
+      child.entry &&
+        canReadLoadedEntry({
+          client: params.client,
+          cfg: params.cfg,
+          entry: child.entry,
+          target: child.target,
+          storePath: child.storePath,
+        }),
+    );
+  });
+  return readable?.length ? readable : undefined;
+}
+
 export const sessionByKeyReadHandlers: GatewayRequestHandlers = {
   "sessions.describe": ({ params, respond, context, client }) => {
     if (!assertValidParams(params, validateSessionsDescribeParams, "sessions.describe", respond)) {
@@ -85,6 +114,16 @@ export const sessionByKeyReadHandlers: GatewayRequestHandlers = {
       rowContext: buildSessionListRowMetadataContext({ now: Date.now() }),
       includeSwarmChildren: true,
     });
+    const childSessions = filterReadableChildSessions({
+      childSessions: row.childSessions,
+      client,
+      cfg,
+    });
+    if (childSessions) {
+      row.childSessions = childSessions;
+    } else {
+      delete row.childSessions;
+    }
     Object.assign(row, readSessionPlacementFields(context, row.sessionId));
     respond(true, { session: row });
   },

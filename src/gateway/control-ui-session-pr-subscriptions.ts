@@ -169,6 +169,19 @@ export function createControlUiSessionPullRequestSubscriptions(
     if (subscription.size === 0) {
       subscriptions.delete(connId);
     }
+    if (subscriptions.size === 0 && timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
+
+  const pruneUnauthorizedConnections = (sessionKey: string, state: WatchedKeyState): boolean => {
+    for (const connId of [...state.connIds]) {
+      if (!canReadSession(connId, sessionKey)) {
+        removeConnectionKey(connId, sessionKey);
+      }
+    }
+    return keyStates.get(sessionKey) === state && state.connIds.size > 0;
   };
 
   const removeMemberships = (
@@ -194,7 +207,12 @@ export function createControlUiSessionPullRequestSubscriptions(
     refresh = false,
   ): Promise<ControlUiSessionPullRequestSnapshot> => {
     const state = keyStates.get(sessionKey);
-    if (scope.isClosing || !state || !isCurrent()) {
+    if (
+      scope.isClosing ||
+      !state ||
+      !pruneUnauthorizedConnections(sessionKey, state) ||
+      !isCurrent()
+    ) {
       return Promise.resolve(UNAVAILABLE_SNAPSHOT);
     }
     const pending = inflight.get(sessionKey);
@@ -212,14 +230,17 @@ export function createControlUiSessionPullRequestSubscriptions(
       limit(async () => {
         // Joiners retain their own watched-key lifetimes. A later force-only
         // watcher must not revive normal work retired while waiting for a slot.
-        if (!Array.from(demands).some((current) => current())) {
+        if (
+          !pruneUnauthorizedConnections(sessionKey, state) ||
+          !Array.from(demands).some((current) => current())
+        ) {
           return UNAVAILABLE_SNAPSHOT;
         }
         // Fresh result identity acknowledges forced loads even when the failure is unchanged.
         const snapshot = await load(loaderParams(sessionKey, refresh), state.cacheLifetime.signal)
           .then(pushedSnapshot)
           .catch(() => ({ ...UNAVAILABLE_SNAPSHOT }));
-        if (keyStates.get(sessionKey) === state) {
+        if (pruneUnauthorizedConnections(sessionKey, state)) {
           const hash = JSON.stringify(snapshot);
           const changed = state.hash !== hash;
           Object.assign(state, { hash, snapshot });

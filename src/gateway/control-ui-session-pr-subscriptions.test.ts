@@ -171,9 +171,8 @@ describe("control UI session PR subscriptions", () => {
 
   it("denies unauthorized keys and suppresses delivery after membership is revoked", async () => {
     let allowed = false;
-    let revision = 0;
     const broadcastToConnIds = vi.fn();
-    const load = vi.fn(async () => ({ ...READY, rateLimited: revision > 0 }));
+    const load = vi.fn(async () => READY);
     active = createControlUiSessionPullRequestSubscriptions({
       broadcastToConnIds,
       canReadSession: () => allowed,
@@ -190,10 +189,15 @@ describe("control UI session PR subscriptions", () => {
     expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
 
     broadcastToConnIds.mockClear();
-    revision++;
+    load.mockClear();
     allowed = false;
     await active.pollNow();
+    expect(load).not.toHaveBeenCalled();
     expect(broadcastToConnIds).not.toHaveBeenCalled();
+
+    allowed = true;
+    await active.pollNow();
+    expect(load).not.toHaveBeenCalled();
   });
 
   it("deduplicates overlapping watchers to one load per key per poll cycle", async () => {

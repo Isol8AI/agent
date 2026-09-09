@@ -300,6 +300,9 @@ test("restricted reads require typed membership and never trust participant hist
         { key: sessionKey },
         options,
       ),
+      parentDescribed: await directSessionReq<{
+        session: { childSessions?: string[] } | null;
+      }>("sessions.describe", { key: parentKey }, options),
       history: await directSessionReq<{ messages: Array<{ content?: unknown }> }>(
         "sessions.get",
         { key: sessionKey },
@@ -321,6 +324,8 @@ test("restricted reads require typed membership and never trust participant hist
     ]);
     expect(hidden.resolved.ok).toBe(false);
     expect(hidden.described.payload?.session).toBeNull();
+    expect(hidden.parentDescribed.payload?.session).not.toBeNull();
+    expect(hidden.parentDescribed.payload?.session).not.toHaveProperty("childSessions");
     expect(hidden.history.payload?.messages).toEqual([]);
   }
 
@@ -334,6 +339,7 @@ test("restricted reads require typed membership and never trust participant hist
   expect(visible.previewed.payload?.previews[0]?.status).toBe("ok");
   expect(visible.resolved.ok).toBe(true);
   expect(visible.described.payload?.session).toMatchObject({ roomKind: "group-dm" });
+  expect(visible.parentDescribed.payload?.session?.childSessions).toEqual([childKey]);
   expect(visible.history.payload?.messages.map((message) => message.content)).toEqual([
     "restricted search needle",
   ]);
