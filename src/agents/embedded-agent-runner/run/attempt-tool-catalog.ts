@@ -54,7 +54,8 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
   setup: EmbeddedAttemptSetup;
   preparedToolBase: PreparedToolBase;
   bundleTools: Pick<PreparedBundleTools, "clientTools" | "uncompactedEffectiveTools"> &
-    Partial<Pick<PreparedBundleTools, "bundleMcpRuntime" | "refreshTools">>;
+    Partial<Pick<PreparedBundleTools, "bundleMcpRuntime">>;
+  refreshTools: () => void;
   runTrace: DiagnosticTraceContext;
   abortSignal: AbortSignal;
   executeCodeModeTool: ToolSearchCatalogToolExecutor;
@@ -68,9 +69,9 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
     await racePromiseWithAbortSignal(ready, signal);
     signal.throwIfAborted();
     if (!coldCatalogApplied) {
+      // The owner refreshes session state and reapplies the retained prompt cap.
+      input.refreshTools();
       coldCatalogApplied = true;
-      input.bundleTools.refreshTools?.();
-      refreshTools();
     }
   };
   const buildCatalog = () => {
