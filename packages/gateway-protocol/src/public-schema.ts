@@ -281,6 +281,8 @@ export {
   SessionMovePlacementSchema,
   SessionsMoveResultSchema,
   SessionsSendParamsSchema,
+  SessionMessageAppendParamsSchema,
+  SessionMessageAppendResultSchema,
   SessionsAbortParamsSchema,
   SESSIONS_PATCH_MANY_MAX_TARGETS,
   SessionsPatchParamsSchema,

@@ -84,6 +84,10 @@ const AGENT_RUN_START_METHODS = new Set([
 ]);
 
 function requiresPrivateRoomCapability(method: string): boolean {
+  // Canonical message persistence has no execution, tool, or delivery capability.
+  if (method === "sessions.message.append") {
+    return false;
+  }
   return (
     !isSessionReadAccessMethod(method) ||
     method === "sessions.companion.ask" ||

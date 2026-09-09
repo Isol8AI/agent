@@ -283,6 +283,7 @@ export const validateSessionsRoomCreateParams = compile(S.SessionsRoomCreatePara
 export const validateSessionsTitlePrepareParams = compile(S.SessionsTitlePrepareParamsSchema);
 export const validateSessionsRecoverParams = compile(S.SessionsRecoverParamsSchema);
 export const validateSessionsSendParams = compile(S.SessionsSendParamsSchema);
+export const validateSessionMessageAppendParams = compile(S.SessionMessageAppendParamsSchema);
 export const validateSessionsReclaimParams = compile(S.SessionsReclaimParamsSchema);
 export const validateSessionsReclaimResult = compile(S.SessionsReclaimResultSchema);
 export const validateSessionsMoveResult = compile(S.SessionsMoveResultSchema);
