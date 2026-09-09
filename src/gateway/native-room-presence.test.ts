@@ -1,5 +1,36 @@
+import { expectDefined } from "@openclaw/normalization-core";
+import { Value } from "typebox/value";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  aggregateNativePresence,
+  normalizeNativePresenceEvent,
+  reconcileNativePresenceSnapshot,
+} from "../../packages/gateway-protocol/src/native-presence-projection.js";
+import {
+  SessionsPresenceHeartbeatParamsSchema,
+  type NativePresenceEvent,
+  type NativePresenceSnapshot,
+} from "../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
 import { createNativeRoomPresence, type NativePresenceAuthority } from "./native-room-presence.js";
+import { nativePresenceHandlers } from "./server-methods/sessions-presence.js";
+import type {
+  GatewayRequestContext,
+  GatewayRequestHandlerOptions,
+} from "./server-methods/types.js";
+
+const access = vi.hoisted(() => ({ allowed: true }));
+vi.mock("./native-room-presence-authority.js", () => ({
+  prepareNativeRoomPresenceAuthority: ({ sessionKey }: { sessionKey: string }) =>
+    access.allowed
+      ? {
+          roomKey: sessionKey,
+          authority: {
+            actor: { type: "profile", id: "server-profile" },
+            isAuthorized: () => access.allowed,
+          },
+        }
+      : undefined,
+}));
 
 const start = 1_800_000_000_000;
 const room = "agent:main:room";
@@ -168,5 +199,219 @@ describe("native room presence lifecycle", () => {
     ).toEqual([expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start })]);
     expect(emit.mock.lastCall?.[1]).toEqual(new Set());
     presence.stop();
+  });
+});
+
+describe("native presence Gateway requests", () => {
+  afterEach(() => {
+    access.allowed = true;
+  });
+
+  it("admits subscription without viewing or a lease and rejects forged timestamps before mutation", async () => {
+    const presence = createNativeRoomPresence({ emit: vi.fn() });
+    const context = {
+      nativeRoomPresence: presence,
+      isConnectionActive: () => true,
+      getRuntimeConfig: () => ({}),
+    } as unknown as GatewayRequestContext;
+    const call = async (action: string, params: Record<string, unknown>) => {
+      const respond = vi.fn();
+      const method = `sessions.presence.${action}`;
+      await expectDefined(
+        nativePresenceHandlers[method],
+        method,
+      )({
+        req: { id: "presence-test", method, type: "req" },
+        params,
+        respond,
+        context,
+        client: { connId: "socket-one" } as never,
+        isWebchatConnect: () => false,
+      } satisfies GatewayRequestHandlerOptions);
+      return respond;
+    };
+    const subscribed = await call("subscribe", { sessionKey: room });
+    expect(subscribed).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ inventoryStatus: "complete", connections: [] }),
+    );
+    const forged = await call("heartbeat", {
+      sessionKey: room,
+      authoritativeLastSeenAtMs: Date.now(),
+    });
+    expect(forged).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ code: "INVALID_REQUEST" }),
+    );
+    expect(presence.snapshot(room).connections).toEqual([]);
+    const heartbeat = await call("heartbeat", {
+      sessionKey: room,
+      visibility: "visible",
+      recentInput: "recent",
+    });
+    expect(heartbeat).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        connections: [
+          expect.objectContaining({
+            actor: { type: "profile", id: "server-profile" },
+            state: "unknown",
+            viewingIntent: "unknown",
+          }),
+        ],
+      }),
+    );
+    access.allowed = false;
+    const revoked = await call("snapshot", { sessionKey: room });
+    expect(revoked).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ code: "INVALID_REQUEST" }),
+    );
+    presence.stop();
+  });
+});
+
+const projectionAt = 1_800_000_000_000;
+const projectionEvent: NativePresenceEvent = {
+  roomKey: room,
+  actor: { type: "profile", id: "one" },
+  connectionId: "connection-one",
+  connectionStartedAtMs: projectionAt,
+  sequence: 1,
+  state: "online",
+  serverReceivedAtMs: projectionAt,
+  expiresAtMs: projectionAt + 90_000,
+  visibility: "visible",
+  visibilityObservedAtMs: projectionAt,
+  recentInput: "recent",
+  recentInputObservedAtMs: projectionAt,
+  viewingIntent: "viewing",
+  viewingIntentReceivedAtMs: projectionAt,
+};
+const projectionSnapshot: NativePresenceSnapshot = {
+  roomKey: projectionEvent.roomKey,
+  serverNowAtMs: projectionAt,
+  inventoryStatus: "complete",
+  connections: [projectionEvent],
+};
+
+describe("native presence evidence", () => {
+  it.each([
+    "actor",
+    "sequence",
+    "connectionId",
+    "connectionStartedAtMs",
+    "serverReceivedAtMs",
+    "expiresAtMs",
+    "lastSeen",
+    "lastSeenAt",
+    "authoritativeLastSeenAtMs",
+    "visibilityObservedAtMs",
+    "recentInputObservedAtMs",
+  ])("rejects client-authored %s", (field) => {
+    expect(
+      Value.Check(SessionsPresenceHeartbeatParamsSchema, {
+        sessionKey: projectionEvent.roomKey,
+        [field]: projectionAt,
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    projectionAt / 1000,
+    projectionAt + 1,
+    projectionAt + 0.5,
+    "2027-01-15T08:00:00Z",
+    NaN,
+    Infinity,
+  ])("does not coerce invalid start or observation evidence %s", (value) => {
+    expect(
+      normalizeNativePresenceEvent(
+        { ...projectionEvent, connectionStartedAtMs: value },
+        projectionAt,
+      ),
+    ).toBeUndefined();
+    expect(
+      normalizeNativePresenceEvent(
+        { ...projectionEvent, visibilityObservedAtMs: value },
+        projectionAt,
+      ),
+    ).toMatchObject({ state: "unknown", visibility: "unknown" });
+    expect(
+      normalizeNativePresenceEvent(
+        { ...projectionEvent, authoritativeLastSeenAtMs: value },
+        projectionAt,
+      )?.authoritativeLastSeenAtMs,
+    ).toBeUndefined();
+  });
+
+  it("accepts bounded future leases and rejects overlong connection or typing expiry", () => {
+    expect(normalizeNativePresenceEvent(projectionEvent, projectionAt)).toEqual(projectionEvent);
+    expect(
+      normalizeNativePresenceEvent(
+        { ...projectionEvent, expiresAtMs: projectionAt + 90_001 },
+        projectionAt,
+      ),
+    ).toBeUndefined();
+    expect(
+      normalizeNativePresenceEvent(
+        { ...projectionEvent, state: "typing", expiresAtMs: projectionAt + 2_500 },
+        projectionAt,
+      )?.state,
+    ).toBe("typing");
+    expect(
+      normalizeNativePresenceEvent(
+        { ...projectionEvent, state: "typing", expiresAtMs: projectionAt + 2_501 },
+        projectionAt,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("merges connection ids independently, rejects stale and invalid sequence poisoning, and reconciles only complete omissions", () => {
+    const initial = reconcileNativePresenceSnapshot(undefined, projectionSnapshot);
+    const another = { ...projectionEvent, connectionId: "second", sequence: 1 };
+    const partial = reconcileNativePresenceSnapshot(initial, {
+      ...projectionSnapshot,
+      inventoryStatus: "incomplete",
+      connections: [another],
+    });
+    expect(partial.connections).toHaveLength(2);
+    const failed = reconcileNativePresenceSnapshot(partial, {
+      ...projectionSnapshot,
+      inventoryStatus: "failed",
+      connections: [],
+    });
+    expect(failed.connections).toHaveLength(2);
+    expect(failed.inventoryStatus).toBe("failed");
+    const invalid = reconcileNativePresenceSnapshot(failed, {
+      ...projectionSnapshot,
+      connections: [{ ...projectionEvent, connectionStartedAtMs: projectionAt + 1, sequence: 100 }],
+    });
+    expect(invalid.connections).toHaveLength(2);
+    expect(invalid.inventoryStatus).toBe("complete");
+    expect(invalid.evidenceStatus).toBe("invalid");
+    expect(
+      invalid.connections.find((row) => row.connectionId === projectionEvent.connectionId)
+        ?.sequence,
+    ).toBe(1);
+    const fresh = reconcileNativePresenceSnapshot(invalid, {
+      ...projectionSnapshot,
+      connections: [{ ...projectionEvent, sequence: 2, state: "away" }],
+    });
+    expect(fresh.connections).toEqual([expect.objectContaining({ sequence: 2, state: "away" })]);
+    const stale = reconcileNativePresenceSnapshot(fresh, projectionSnapshot);
+    expect(stale.connections[0].sequence).toBe(2);
+    expect(aggregateNativePresence(partial, projectionEvent.actor)).toBe("online");
+    expect(
+      aggregateNativePresence(
+        { ...projectionSnapshot, inventoryStatus: "incomplete", connections: [] },
+        projectionEvent.actor,
+      ),
+    ).toBe("unknown");
+    expect(
+      aggregateNativePresence({ ...projectionSnapshot, connections: [] }, projectionEvent.actor),
+    ).toBe("offline");
   });
 });

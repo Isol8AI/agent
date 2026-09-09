@@ -55,6 +55,7 @@ import {
 import { sendGatewayHello } from "./connect-hello.js";
 import { prepareGatewayNodeConnect } from "./connect-node-session.js";
 import {
+  resolveAuthenticatedProfile,
   resolveGatewayConnectUserProfile,
   resolveTrustedBrokerProfile,
 } from "./connect-user-profile.js";

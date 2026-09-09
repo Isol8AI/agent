@@ -138,7 +138,10 @@ describe("private execution dispatch boundary", () => {
       const receipt = appended.mock.calls[0]![1] as SessionMessageAppendResult;
       const dispatchParams = { ...request, inputMessageId: receipt.messageId };
       admission.startTurn.mockImplementationOnce(async ({ io }: { io: AgentTurnIo }) => {
-        io.emitAcceptance([false, undefined, { code: "UNAVAILABLE", message: "quota denied" }]);
+        io.emitAcceptance(
+          [false, undefined, { code: "UNAVAILABLE", message: "quota denied" }],
+          undefined,
+        );
       });
       const responded = vi.fn();
       await dispatchSessionExecution({
