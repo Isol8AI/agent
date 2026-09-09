@@ -47,7 +47,6 @@ import {
 } from "./server/health-state.js";
 import { broadcastPresenceSnapshot } from "./server/presence-events.js";
 import { createSessionViewerPresenceDeclarations } from "./session-viewer-presence.js";
-import { canReceiveSessionEvent } from "./session-sharing.js";
 
 type GatewayRuntimePreparation = Awaited<ReturnType<typeof prepareGatewayKernelState>>;
 type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
@@ -343,18 +342,7 @@ export async function prepareGatewayLifecycle(params: {
   runtimeState.controlUiSessionPullRequests = createControlUiSessionPullRequestSubscriptions({
     broadcastToConnIds,
     isConnectionActive,
-    canReadSession: (connId, sessionKey) => {
-      const client = clients.getByConnectionId(connId);
-      return Boolean(
-        client &&
-          canReceiveSessionEvent({
-            cfg: getRuntimeConfig(),
-            client,
-            event: "controlUi.sessionPullRequests.changed",
-            sessionKeys: [sessionKey],
-          }),
-      );
-    },
+    canReadSession: runtime.canReadSession,
   });
   runtimeState.sessionViewerPresence = createSessionViewerPresenceDeclarations({
     clients,

@@ -1,5 +1,7 @@
 import type {
   SessionCreatedActor,
+  SessionMember,
+  SessionMemberEvidence,
   SessionMemberIdentity,
   SessionSharingIdentity,
 } from "../../packages/gateway-protocol/src/index.js";
@@ -9,6 +11,7 @@ import { listProfiles } from "../state/user-profiles.js";
 
 export const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
 export const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
+const LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS = new Set(["local-operator", "operator.admin"]);
 
 export type SharingActorFacts =
   | { state: "present"; actor: SessionSharingIdentity }
@@ -29,6 +32,53 @@ export function sharingActorStorageRef(facts: SharingActorFacts): string {
     : facts.state === "unknown"
       ? UNKNOWN_SHARING_ACTOR_STORAGE_REF
       : UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF;
+}
+
+export function projectSessionMemberEvidence(member: {
+  identity: SessionMemberIdentity;
+  identityId: string;
+  addedBy: string;
+  addedAt: number;
+}): SessionMemberEvidence {
+  const common = {
+    identity: member.identity,
+    identityId: member.identityId,
+    addedAt: member.addedAt,
+  };
+  if (member.addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
+    return { ...common, addedByState: "unknown" };
+  }
+  if (
+    member.addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
+    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(member.addedBy)
+  ) {
+    return common;
+  }
+  return { ...common, addedBy: member.addedBy };
+}
+
+export function projectLegacySessionMember(member: SessionMemberEvidence): SessionMember | null {
+  return member.addedBy
+    ? {
+        identity: member.identity,
+        identityId: member.identityId,
+        addedBy: member.addedBy,
+        addedAt: member.addedAt,
+      }
+    : null;
+}
+
+export function memberIdentityFromParams(params: {
+  identity?: SessionMemberIdentity;
+  identityId?: string;
+}): SessionMemberIdentity | null {
+  const legacyId = params.identityId?.trim();
+  const identity = params.identity
+    ? { type: params.identity.type, id: params.identity.id.trim() }
+    : legacyId
+      ? { type: "profile" as const, id: legacyId }
+      : undefined;
+  return !identity?.id || (legacyId && legacyId !== identity.id) ? null : identity;
 }
 
 export function knownSessionIdentities(params: {

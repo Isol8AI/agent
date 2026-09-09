@@ -194,7 +194,7 @@ export function createNodeSubscriptionManager(
       return;
     }
     if (options.authorizeSessionAccess?.(normalizedSessionKey) === false) {
-      for (const [nodeId, pairingGeneration] of [...subscribers]) {
+      for (const [nodeId, pairingGeneration] of subscribers) {
         unsubscribe(nodeId, pairingGeneration, normalizedSessionKey);
       }
       return;

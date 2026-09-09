@@ -33,6 +33,7 @@ import { OpenClawAgentDatabaseMediaMigrationRequiredError } from "./openclaw-age
 import {
   ensureSessionAdditiveColumns,
   ensureSessionEntryValidityProjection,
+  readSqliteTableColumns,
 } from "./openclaw-agent-db-session-migrations.js";
 import { SESSION_GOAL_OPERATIONS_TABLE } from "./openclaw-agent-goal-operations-schema.js";
 import { MESSAGE_TOOL_RUN_OUTCOMES_TABLE } from "./openclaw-agent-message-tool-outcome-schema.js";
@@ -114,6 +115,24 @@ export function hasRetiredAgentStateLeaseSchema(database: DatabaseSync): boolean
   return Boolean(
     database.prepare("SELECT 1 FROM main.sqlite_schema WHERE name = 'state_leases'").get(),
   );
+}
+
+export function hasPendingSessionKeyContractSchemaMigration(database: DatabaseSync): boolean {
+  const sessionNodeColumns = readSqliteTableColumns(database, "session_nodes");
+  if (!sessionNodeColumns) {
+    return false;
+  }
+  const hasContractTable = Boolean(
+    database
+      .prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'session_key_contract'")
+      .get(),
+  );
+  return !sessionNodeColumns.has("entry_valid") || !hasContractTable;
+}
+
+export function hasPendingSessionProjectColumn(database: DatabaseSync): boolean {
+  const columns = readSqliteTableColumns(database, "session_nodes");
+  return Boolean(columns && !columns.has("project_id"));
 }
 
 export function assertOpenClawAgentSchemaContains(

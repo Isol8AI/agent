@@ -138,7 +138,6 @@ export {
   authorizeSessionSharingTarget,
   canAccessIncognitoSession,
   canManageSessionSharing,
-  canReadSessionSharingTarget,
   gatewayClientSessionMemberIdentity,
   isGatewayAdmin,
   isResolvedIncognitoSession,
@@ -147,7 +146,6 @@ export {
   resolveSessionSharingTarget,
   resolveSessionSharingTargets,
   resolveSessionVisibility,
-  authorizeSessionReadTarget,
 } from "./session-sharing-policy.js";
 
 export function resolveSessionMutationAuthorization(params: {

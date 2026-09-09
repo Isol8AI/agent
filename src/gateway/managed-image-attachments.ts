@@ -586,17 +586,25 @@ function verifyManagedOutgoingImageTicket(params: {
     const payload = JSON.parse(
       Buffer.from(encodedPayload, "base64url").toString("utf8"),
     ) as Partial<ManagedOutgoingImageTicketPayload>;
-    return (
-      payload.scope === MANAGED_OUTGOING_IMAGE_TICKET_SCOPE &&
-      payload.sessionKey === params.sessionKey &&
-      payload.attachmentId === params.attachmentId &&
-      payload.variant === "full" &&
-      typeof payload.exp === "number" &&
-      Number.isFinite(payload.exp) &&
-      payload.exp >= now
-    )
-      ? (payload as ManagedOutgoingImageTicketPayload)
-      : undefined;
+    if (
+      payload.scope !== MANAGED_OUTGOING_IMAGE_TICKET_SCOPE ||
+      payload.sessionKey !== params.sessionKey ||
+      payload.attachmentId !== params.attachmentId ||
+      payload.variant !== "full" ||
+      typeof payload.exp !== "number" ||
+      !Number.isFinite(payload.exp) ||
+      payload.exp < now
+    ) {
+      return undefined;
+    }
+    return {
+      scope: payload.scope,
+      sessionKey: payload.sessionKey,
+      attachmentId: payload.attachmentId,
+      variant: payload.variant,
+      exp: payload.exp,
+      ...(payload.access ? { access: payload.access } : {}),
+    };
   } catch {
     return undefined;
   }

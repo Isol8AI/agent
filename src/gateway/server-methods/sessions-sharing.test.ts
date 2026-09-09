@@ -101,6 +101,19 @@ async function call(
   return responses;
 }
 
+function successfulProfileMemberMutation(
+  sessionKey: string,
+  identityId: string,
+): Parameters<RespondFn>[] {
+  return [
+    [
+      true,
+      { ok: true, sessionKey, identity: { type: "profile", id: identityId }, identityId },
+      undefined,
+    ],
+  ];
+}
+
 function sessionMembersListEvidenceResult(
   responses: Parameters<RespondFn>[],
 ): SessionMembersListEvidenceResult {
@@ -184,18 +197,7 @@ describe("session sharing handlers", () => {
             requestContext,
             item.client,
           ),
-        ).toEqual([
-          [
-            true,
-            {
-              ok: true,
-              sessionKey,
-              identity: { type: "profile", id: member.id },
-              identityId: member.id,
-            },
-            undefined,
-          ],
-        ]);
+        ).toEqual(successfulProfileMemberMutation(sessionKey, member.id));
         const listed = await call(
           "session.members.listEvidence",
           { sessionKey },
@@ -227,18 +229,7 @@ describe("session sharing handlers", () => {
             requestContext,
             item.client,
           ),
-        ).toEqual([
-          [
-            true,
-            {
-              ok: true,
-              sessionKey,
-              identity: { type: "profile", id: member.id },
-              identityId: member.id,
-            },
-            undefined,
-          ],
-        ]);
+        ).toEqual(successfulProfileMemberMutation(sessionKey, member.id));
         flushPendingSessionsChangedEvents(requestContext);
         expect(requestContext.broadcastToConnIds).toHaveBeenCalledWith(
           "sessions.changed",
@@ -781,18 +772,7 @@ describe("session sharing handlers", () => {
             { sessionKey, identityId: selectable.id },
             requestContext,
           ),
-        ).toEqual([
-          [
-            true,
-            {
-              ok: true,
-              sessionKey,
-              identity: { type: "profile", id: profile.id },
-              identityId: profile.id,
-            },
-            undefined,
-          ],
-        ]);
+        ).toEqual(successfulProfileMemberMutation(sessionKey, profile.id));
       } finally {
         parsed.mockRestore();
       }
@@ -933,18 +913,7 @@ describe("session sharing handlers", () => {
 
       expect(
         await call("session.members.add", { sessionKey, identityId: member.id }, requestContext),
-      ).toEqual([
-        [
-          true,
-          {
-            ok: true,
-            sessionKey,
-            identity: { type: "profile", id: member.id },
-            identityId: member.id,
-          },
-          undefined,
-        ],
-      ]);
+      ).toEqual(successfulProfileMemberMutation(sessionKey, member.id));
       expect(listSessionMembers({ agentId: "main", sessionKey })).toEqual([
         expect.objectContaining({
           identityId: member.id,
@@ -954,18 +923,7 @@ describe("session sharing handlers", () => {
 
       expect(
         await call("session.members.remove", { sessionKey, identityId: member.id }, requestContext),
-      ).toEqual([
-        [
-          true,
-          {
-            ok: true,
-            sessionKey,
-            identity: { type: "profile", id: member.id },
-            identityId: member.id,
-          },
-          undefined,
-        ],
-      ]);
+      ).toEqual(successfulProfileMemberMutation(sessionKey, member.id));
       expect(listSessionMembers({ agentId: "main", sessionKey })).toEqual([]);
 
       expect(

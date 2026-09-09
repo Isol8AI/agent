@@ -176,7 +176,7 @@ export function createControlUiSessionPullRequestSubscriptions(
   };
 
   const pruneUnauthorizedConnections = (sessionKey: string, state: WatchedKeyState): boolean => {
-    for (const connId of [...state.connIds]) {
+    for (const connId of state.connIds) {
       if (!canReadSession(connId, sessionKey)) {
         removeConnectionKey(connId, sessionKey);
       }

@@ -297,7 +297,8 @@ export function createControlUiHandlers(
         );
         return;
       }
-      if (subscriptions.authorize?.(connId, parsed.sessionKeys) === false) {
+      const authorized = subscriptions.authorize?.(connId, parsed.sessionKeys);
+      if (authorized !== undefined && !authorized) {
         respond(
           false,
           undefined,

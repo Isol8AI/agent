@@ -39,6 +39,8 @@ const SESSION_ENTRY_RESERVED_SLOT_KEY_LIST = [
   "worktree",
   "projectId",
   "repositoryWorkspaceId",
+  "roomKind",
+  "threadOrigin",
   "pendingProjectGitUrl",
   "pendingWorktree",
   "parentSessionKey",
@@ -185,6 +187,7 @@ const SESSION_ENTRY_RESERVED_SLOT_KEY_LIST = [
   "quotaSuspension",
   "pendingTranscriptRepair",
   "visibility",
+  "privateRoomExecutionPolicy",
   "publicShare",
 ] as const satisfies ReadonlyArray<
   keyof SessionEntry | "__proto__" | "constructor" | "prototype" | "sessionFile" | "transcriptPath"

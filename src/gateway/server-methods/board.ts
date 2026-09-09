@@ -31,6 +31,7 @@ import {
   boardDataBindingCapability,
   captureBoardCapabilityAuthority,
   captureBoardRequestAuthority,
+  captureBoardSessionBearerAccess,
   readBoardDataBinding,
   respondBoardError,
   runBoardActionVerb,
@@ -52,7 +53,6 @@ import {
 } from "../mcp-app-operations.js";
 import { mintMcpAppViewFromTranscript } from "../mcp-app-reconstruction.js";
 import { sessionObserverScopeKey } from "../session-observer-model.js";
-import { captureSessionBearerAccess } from "../session-bearer-access.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveSessionStoreKey } from "../session-store-key.js";
 import { emitSessionsChanged } from "./session-change-event.js";
@@ -186,12 +186,7 @@ export function createBoardHandlers(
               authority.assertActive();
             }
             authority.assertActive();
-            const access = captureSessionBearerAccess({
-              cfg: context.getRuntimeConfig(),
-              client,
-              sessionKey: boardSession.sessionKey,
-              ...(boardSession.agentId ? { agentId: boardSession.agentId } : {}),
-            });
+            const access = captureBoardSessionBearerAccess(invocation, boardSession);
             const { ticket } = createBoardViewTicket({
               ...(boardSession.agentId ? { agentId: boardSession.agentId } : {}),
               sessionKey: snapshot.sessionKey,

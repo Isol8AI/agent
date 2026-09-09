@@ -61,6 +61,7 @@ import {
   validateSessionProjectPreparation,
 } from "./session-create-project.js";
 import { prepareSessionCreateFilesystemRoot } from "./session-create-root.js";
+import { validatePrivateRoomCreation } from "./session-create-private-room.js";
 import { resolveOperatorSessionCreation } from "./session-creation-provenance.js";
 import { sessionLog } from "./sessions-shared.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -84,51 +85,12 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const hasRestrictedRoomContract =
-      p.visibility === "restricted" ||
-      p.roomKind !== undefined ||
-      p.members !== undefined ||
-      p.threadOrigin !== undefined;
-    if (
-      hasRestrictedRoomContract &&
-      (p.visibility !== "restricted" || !p.roomKind || !p.members)
-    ) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "restricted room creation requires visibility, roomKind, and members",
-        ),
-      );
+    const privateRoomCreation = validatePrivateRoomCreation(p);
+    if (privateRoomCreation.error) {
+      respond(false, undefined, privateRoomCreation.error);
       return;
     }
-    if (
-      hasRestrictedRoomContract &&
-      (p.incognito === true ||
-        p.cwd !== undefined ||
-        p.worktree !== undefined ||
-        p.worktreeBaseRef !== undefined ||
-        p.worktreeName !== undefined ||
-        p.projectId !== undefined ||
-        p.projectGitUrl !== undefined ||
-        p.repository !== undefined ||
-        p.execNode !== undefined ||
-        p.catalogId !== undefined ||
-        p.mentions !== undefined ||
-        p.permissionMode !== undefined ||
-        p.toolOverrides !== undefined)
-    ) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "restricted rooms use the server-owned private execution policy",
-        ),
-      );
-      return;
-    }
+    const hasRestrictedRoomContract = privateRoomCreation.restricted;
     const parentSessionKey = normalizeOptionalString(p.parentSessionKey);
     const sessionCreation = prepareSkillLibrarySessionCreation(
       client,

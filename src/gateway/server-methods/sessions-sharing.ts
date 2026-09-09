@@ -8,9 +8,6 @@ import {
   validateSessionVisibilitySetParams,
   validateSessionPublicShareSetParams,
   type SessionPublicShare,
-  type SessionMember,
-  type SessionMemberIdentity,
-  type SessionMemberEvidence,
   type SessionSharingEvent,
   type SessionSharingEvidenceEvent,
   type SessionVisibility,
@@ -37,10 +34,11 @@ import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
 import {
   isKnownSessionMemberIdentity,
   knownSessionIdentities,
+  memberIdentityFromParams,
+  projectLegacySessionMember,
+  projectSessionMemberEvidence,
   sharingActorStorageRef,
   type SharingActorFacts,
-  UNKNOWN_SHARING_ACTOR_STORAGE_REF,
-  UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF,
 } from "../session-sharing-identities.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
@@ -70,8 +68,6 @@ function runExclusiveSharingMutation<T>(
   });
 }
 
-const LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS = new Set(["local-operator", "operator.admin"]);
-
 function actorIdentity(client: GatewayClient | null): SharingActorFacts {
   const principal = gatewayClientSessionCreator(client);
   if (principal) {
@@ -80,58 +76,6 @@ function actorIdentity(client: GatewayClient | null): SharingActorFacts {
   return getGatewayLocalUserIngress(client)?.facts.invoker?.state === "unknown"
     ? { state: "unknown" }
     : { state: "absent" };
-}
-
-function projectSessionMemberEvidence(
-  member: ReturnType<typeof listSessionMembers>[number],
-): SessionMemberEvidence {
-  // Sentinel ids satisfy the existing non-null storage contract only. Project
-  // actor evidence here so persistence markers never become protocol identities.
-  const common = {
-    identity: member.identity,
-    identityId: member.identityId,
-    addedAt: member.addedAt,
-  };
-  if (member.addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
-    return { ...common, addedByState: "unknown" };
-  }
-  if (
-    member.addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
-    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(member.addedBy)
-  ) {
-    // Beta builds stored fabricated operator ids before actor evidence became
-    // tri-state. Discard those unshipped values instead of presenting principals.
-    return common;
-  }
-  return { ...common, addedBy: member.addedBy };
-}
-
-function projectLegacySessionMember(member: SessionMemberEvidence): SessionMember | null {
-  if (!member.addedBy) {
-    return null;
-  }
-  return {
-    identity: member.identity,
-    identityId: member.identityId,
-    addedBy: member.addedBy,
-    addedAt: member.addedAt,
-  };
-}
-
-function memberIdentityFromParams(params: {
-  identity?: SessionMemberIdentity;
-  identityId?: string;
-}): SessionMemberIdentity | null {
-  const legacyId = params.identityId?.trim();
-  const identity = params.identity
-    ? { type: params.identity.type, id: params.identity.id.trim() }
-    : legacyId
-      ? { type: "profile" as const, id: legacyId }
-      : undefined;
-  if (!identity?.id || (legacyId && legacyId !== identity.id)) {
-    return null;
-  }
-  return identity;
 }
 
 function projectPublicSessionShare(params: {

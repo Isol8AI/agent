@@ -96,7 +96,8 @@ function isValidClaims(value: unknown): value is BoardViewTicketClaims {
       (typeof claims.access === "object" &&
         typeof claims.access.sessionId === "string" &&
         claims.access.sessionId.length > 0 &&
-        (claims.access.admin === undefined || claims.access.admin === true) &&
+        (typeof claims.access.admin === "undefined" ||
+          (typeof claims.access.admin === "boolean" && claims.access.admin)) &&
         (claims.access.reader === undefined ||
           ((claims.access.reader.type === "profile" || claims.access.reader.type === "agent") &&
             typeof claims.access.reader.id === "string" &&
