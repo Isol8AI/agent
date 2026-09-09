@@ -53,7 +53,7 @@ import {
 } from "../session-utils.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { prepareSessionWorkspaceIcon } from "../workspace-icon-http.js";
-import { canReadChatHistoryTarget } from "./chat-history-access.js";
+import { prepareChatHistoryAccess } from "./chat-history-access.js";
 import {
   CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES,
   createChatHistoryByteCounter,
@@ -464,7 +464,8 @@ async function handleChatHistoryRequest({
     return;
   }
   const sharingCfg = currentSharingState?.cfg ?? cfg;
-  if (sharingTarget && !canReadChatHistoryTarget(sharingCfg, client, sharingTarget)) {
+  const sharing = prepareChatHistoryAccess(sharingCfg, client);
+  if (sharingTarget && !sharing.canReadTarget(sharingTarget)) {
     respond(false, undefined, hiddenSessionNotFound(canonicalKey));
     return;
   }
