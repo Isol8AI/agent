@@ -401,4 +401,55 @@ describe("sessions.message.append", () => {
       ).toMatchObject({ code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" });
     });
   });
+
+  it("admits an authenticated admin with a valid target and commit guard", async () => {
+    await withOpenClawTestState({ label: "message-append-admin" }, async (state) => {
+      await state.writeConfig(cfg);
+      await seedRoom();
+      const admin = identifiedClient("admin");
+      admin.connect.scopes = ["operator.admin"];
+      const authorization = resolveSessionMutationAuthorization({
+        client: admin,
+        context: context(),
+        method: "sessions.message.append",
+        requestParams: params,
+      });
+      expect(authorization).toMatchObject({ error: null, authorization: expect.any(Object) });
+      expect(authorization.authorization?.assertCurrent).toEqual(expect.any(Function));
+      expect(receipt(await invoke({ idempotencyKey: "admin-contribution" }, admin)).appended).toBe(
+        true,
+      );
+    });
+  });
+
+  it.each(["restricted", "draft"] as const)(
+    "does not disclose a denied %s room",
+    async (visibility) => {
+      await withOpenClawTestState(
+        { label: `message-append-hidden-${visibility}` },
+        async (state) => {
+          await state.writeConfig(cfg);
+          await seedRoom();
+          await upsertSessionEntryCore(scope, { visibility, updatedAt: 2 });
+          const outsider = identifiedClient("outsider");
+          const expected = `Session "${scope.sessionKey}" was not found.`;
+          expect(
+            resolveSessionMutationAuthorization({
+              client: outsider,
+              context: context(),
+              method: "sessions.message.append",
+              requestParams: params,
+            }).error,
+          ).toMatchObject({ message: expected });
+          const response = await invoke({}, outsider);
+          expect(response[2]).toMatchObject({ message: expected });
+          expect(JSON.stringify(response[2])).not.toMatch(/restricted|draft|visibility/);
+          const missingKey = "agent:main:missing-room";
+          expect((await invoke({ sessionKey: missingKey }, outsider))[2]).toMatchObject({
+            message: `Session "${missingKey}" was not found.`,
+          });
+        },
+      );
+    },
+  );
 });

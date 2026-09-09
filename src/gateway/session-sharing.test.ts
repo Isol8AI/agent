@@ -359,6 +359,7 @@ describe("session sharing policy", () => {
       const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
       for (const [method, requestParams] of [
         ["chat.history", { sessionKey }],
+        ["sessions.message.append", { sessionKey }],
         ["sessions.get", { key: sessionKey }],
         ["sessions.messages.subscribe", { key: sessionKey }],
         ["sessions.viewers.set", { sessionKeys: [sessionKey] }],
@@ -393,7 +394,7 @@ describe("session sharing policy", () => {
           context,
         }).error;
         expect(error, method).toMatchObject(
-          isSessionReadAccessMethod(method)
+          isSessionReadAccessMethod(method) || method === "sessions.message.append"
             ? { message: `Session "${sessionKey}" was not found.` }
             : { details: { code: "SESSION_PARTICIPATION_REQUIRED" } },
         );
@@ -914,7 +915,7 @@ describe("session sharing policy", () => {
 
   it("fails closed when a required session mutation has no target", () => {
     const context = { chatAbortControllers: new Map(), getRuntimeConfig: () => ({}) } as never;
-    for (const method of ["sessions.reset", "sessions.move"]) {
+    for (const method of ["sessions.reset", "sessions.move", "sessions.message.append"]) {
       expect(
         resolveSessionMutationAuthorization({
           client: client({}),
@@ -925,14 +926,17 @@ describe("session sharing policy", () => {
         method,
       ).toMatchObject({ details: { code: "SESSION_MUTATION_TARGET_REQUIRED" } });
     }
-    expect(
-      resolveSessionMutationAuthorization({
-        client: client({ scopes: ["operator.admin"] }),
-        method: "sessions.reset",
-        requestParams: {},
-        context,
-      }).error,
-    ).toMatchObject({ details: { code: "SESSION_MUTATION_TARGET_REQUIRED" } });
+    for (const method of ["sessions.reset", "sessions.message.append"]) {
+      expect(
+        resolveSessionMutationAuthorization({
+          client: client({ scopes: ["operator.admin"] }),
+          method,
+          requestParams: {},
+          context,
+        }).error,
+        method,
+      ).toMatchObject({ details: { code: "SESSION_MUTATION_TARGET_REQUIRED" } });
+    }
   });
 
   it("retains identity-less legacy event fanout for shared sessions", async () => {
@@ -945,6 +949,27 @@ describe("session sharing policy", () => {
       expect(
         canReceiveSessionEvent({ cfg: {}, client: client({}) as never, sessionKeys: [sessionKey] }),
       ).toBe(true);
+    });
+  });
+
+  it("denies identity-less legacy event fanout for draft and missing sessions", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const draftKey = "agent:main:identityless-draft";
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey: draftKey },
+        { sessionId: "identityless-draft", updatedAt: 1, visibility: "draft" },
+      );
+      for (const sessionKey of [draftKey, "agent:main:identityless-missing"]) {
+        expect(
+          canReceiveSessionEvent({
+            cfg: {},
+            client: client({}) as never,
+            sessionKeys: [sessionKey],
+            event: "session.message",
+          }),
+          sessionKey,
+        ).toBe(false);
+      }
     });
   });
 

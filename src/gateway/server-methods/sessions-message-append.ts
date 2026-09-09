@@ -23,7 +23,9 @@ import {
 import { SessionMutationAuthorizationChangedError } from "../session-mutation-authorization-error.js";
 import {
   authorizeIncognitoSessionTarget,
-  authorizeSessionSharingTarget,
+  authorizeSessionMessageAppendTarget,
+  hiddenSessionNotFound,
+  isGatewayAdmin,
   resolveSessionSharingTarget,
 } from "../session-sharing-policy.js";
 import type { GatewayRequestHandler } from "./types.js";
@@ -90,7 +92,7 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
     assertAuthor();
     const target = resolveSessionSharingTarget({ cfg, sessionKey: request.sessionKey });
     if (!target) {
-      reject("message append session was not found");
+      throw new SessionMutationAuthorizationChangedError(hiddenSessionNotFound(request.sessionKey));
     }
     const scope = {
       agentId: target.agentId,
@@ -126,12 +128,16 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
           client,
           sessionKey: scope.sessionKey,
           target: current,
-        }) ?? authorizeSessionSharingTarget({ cfg: currentCfg, client, target: current });
+        }) ?? authorizeSessionMessageAppendTarget({ cfg: currentCfg, client, target: current });
       if (accessError) {
         throw new SessionMutationAuthorizationChangedError(accessError);
       }
       // An autonomous run's operator grants and presentation profile never confer room membership.
-      if (current.entry.visibility === "restricted" && !isSessionMember(scope, identity)) {
+      if (
+        current.entry.visibility === "restricted" &&
+        !isGatewayAdmin(client) &&
+        !isSessionMember(scope, identity)
+      ) {
         reject("message append requires room membership");
       }
       if (

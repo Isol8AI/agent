@@ -33,6 +33,7 @@ import { SessionMutationAuthorizationChangedError } from "./session-mutation-aut
 import {
   authorizeIncognitoSessionTarget,
   authorizeSessionAgentRun,
+  authorizeSessionMessageAppendTarget,
   authorizeSessionReadTarget,
   authorizeSessionSharingTarget,
   canManageSessionSharing,
@@ -173,7 +174,7 @@ export function resolveSessionMutationAuthorization(params: {
     isGatewayAdmin(params.client) &&
     !authorizesAgentRun &&
     !requiresPrivateRoomCapability(params.method);
-  if (adminBypass && !bindsProgressLifecycle) {
+  if (adminBypass && !bindsProgressLifecycle && !isRequiredSessionTargetMethod(params.method)) {
     return { error: null };
   }
   if (
@@ -189,6 +190,10 @@ export function resolveSessionMutationAuthorization(params: {
   // config change cannot split target discovery from authorization.
   let cachedCfg: OpenClawConfig | undefined;
   const getCfg = (): OpenClawConfig => (cachedCfg ??= params.context.getRuntimeConfig());
+  const authorizeMutationTarget = (cfg: OpenClawConfig, target: SessionSharingTarget) =>
+    params.method === "sessions.message.append"
+      ? authorizeSessionMessageAppendTarget({ cfg, client: params.client, target })
+      : authorizeSessionSharingTarget({ cfg, client: params.client, target });
   // Each cache pair defines one synchronous freshness epoch: initial authorization shares one,
   // while commit-time guards start fresh after handler work.
   const createLookupCaches = (): {
@@ -327,7 +332,7 @@ export function resolveSessionMutationAuthorization(params: {
       target && resolveSessionVisibility(target.entry) === "restricted"
         ? authorizesRead
           ? authorizeSessionReadTarget({ cfg: getCfg(), client: params.client, target })
-          : authorizeSessionSharingTarget({ cfg: getCfg(), client: params.client, target })
+          : authorizeMutationTarget(getCfg(), target)
         : null;
     const error =
       restrictedAccessError ??
@@ -355,7 +360,7 @@ export function resolveSessionMutationAuthorization(params: {
         resolveSessionVisibility(target.entry) !== "restricted" &&
         (operatorSessionCap(params.client, getCfg()) ?? "write") === "write"
       )
-        ? authorizeSessionSharingTarget({ cfg: getCfg(), client: params.client, target })
+        ? authorizeMutationTarget(getCfg(), target)
         : null);
     if (error) {
       return { error };
@@ -488,11 +493,7 @@ export function resolveSessionMutationAuthorization(params: {
                   client: params.client,
                   target: current,
                 })
-              : authorizeSessionSharingTarget({
-                  cfg: currentCfg,
-                  client: params.client,
-                  target: current,
-                })
+              : authorizeMutationTarget(currentCfg, current)
             : null;
         const error =
           restrictedAccessError ??
@@ -516,11 +517,7 @@ export function resolveSessionMutationAuthorization(params: {
                 target: current,
               })
             : resolveSessionVisibility(current.entry) !== "restricted"
-              ? authorizeSessionSharingTarget({
-                  cfg: currentCfg,
-                  client: params.client,
-                  target: current,
-                })
+              ? authorizeMutationTarget(currentCfg, current)
               : null);
         if (error) {
           throw new SessionMutationAuthorizationChangedError(error);
@@ -626,6 +623,7 @@ export function canReceiveSessionEvent(params: {
     }
     if (!identity) {
       return (
+        snapshot.visibility !== "draft" &&
         (!cfg.gateway?.roles || operatorActor?.kind === "system") &&
         event !== "session.suggestion" &&
         event !== "session.typing"

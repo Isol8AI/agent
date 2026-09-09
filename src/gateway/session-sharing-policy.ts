@@ -461,6 +461,20 @@ export function authorizeSessionSharingTarget(params: {
       });
 }
 
+/** Preserve append authorization while hiding private-room existence from denied callers. */
+export function authorizeSessionMessageAppendTarget(
+  params: Parameters<typeof authorizeSessionSharingTarget>[0],
+): ErrorShape | null {
+  const error = authorizeSessionSharingTarget(params);
+  if (!error) {
+    return null;
+  }
+  const visibility = resolveSessionVisibility(params.target.entry);
+  return visibility === "restricted" || visibility === "draft"
+    ? hiddenSessionNotFound(params.target.canonicalKey)
+    : error;
+}
+
 /** Read authorization preserves public visibility semantics and adds explicit restricted ACLs. */
 export function authorizeSessionReadTarget(params: {
   cfg?: OpenClawConfig;
