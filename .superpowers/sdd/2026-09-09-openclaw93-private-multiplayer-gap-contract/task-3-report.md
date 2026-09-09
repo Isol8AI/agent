@@ -28,9 +28,10 @@ Added `src/plugins/hooks.private-room.test.ts` using the real hook dispatcher an
 
 - Worktree: `/Users/prasiddhaparthsarthy/Desktop/isol8.nosync/.worktrees/openclaw-room-isolation-presence`
 - Branch: `codex/openclaw-room-isolation-presence`
-- Original stacked base: `9882de4e5d5d4db76cdd2bb168af323e188a83fe`
-- Feature commit: `3a60b79e03` — `feat: isolate private room execution and add native presence` (75 files, 2,481 additions, 56 deletions).
-- This report and the local ruling ledger are committed separately after the feature commit. No push, rebase, merge, or cherry-pick was performed. Parent owns transplanting the feature onto final Task 2 head `e5ae8e207919a4b4221a953a26838b14af13befd` and opening/updating the stacked PR.
+- Original reviewed base/tip: `9882de4e5d5d4db76cdd2bb168af323e188a83fe` / `4c0c479119c5b65fc90e95c7aa05d55c0487c045`.
+- Current stacked base: `78d28587ea8488d7e350330c050fbe66b9ab912f` (`codex/openclaw-room-append`).
+- Current commits: feature `2c136087ae870cd3ce83e792b5afeb9cbbcbbb3e`, report `0f7bfb415543c38842de186efec71690ebc87c71`, completion-hook fence `5ee4dd52f18ec8b1bdb9f82dcfe6b63fb5bdd81f`, and command/archive isolation `935ca10fa4ea96e1e3fd4244471dcad68fe8e077`.
+- The rebased branch is pushed for a stacked PR. The deterministic Kotlin protocol generator resolved the overlapping PR #9/Task 3 generated model during rebase; no local validation ran.
 
 ## Implemented boundaries
 
