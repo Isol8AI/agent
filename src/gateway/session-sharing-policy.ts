@@ -155,8 +155,9 @@ export type SessionSharingRoleParams = {
 
 export function gatewayClientSessionMemberIdentity(
   client: GatewayClient | null,
-  actor: ReturnType<typeof resolveGatewayOperatorRoleActor> =
-    resolveGatewayOperatorRoleActor(client),
+  actor: ReturnType<typeof resolveGatewayOperatorRoleActor> = resolveGatewayOperatorRoleActor(
+    client,
+  ),
 ): SessionMemberIdentity | undefined {
   const profileId =
     gatewayClientSessionCreator(client)?.id ??
@@ -174,10 +175,10 @@ function isSessionCreatorIdentity(
 ): boolean {
   return Boolean(
     actor?.id &&
-      identity &&
-      actor.id === identity.id &&
-      ((actor.type === "human" && identity.type === "profile") ||
-        (actor.type === "agent" && identity.type === "agent")),
+    identity &&
+    actor.id === identity.id &&
+    ((actor.type === "human" && identity.type === "profile") ||
+      (actor.type === "agent" && identity.type === "agent")),
   );
 }
 

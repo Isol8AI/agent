@@ -87,9 +87,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const restrictIncognito =
       Boolean(gatewayClientSessionCreator(client)) && !isGatewayAdmin(client);
     const sharing = prepareSessionSharing({ client, cfg });
-    const roleVisibilityFilter = hasOperatorBoundary(client, cfg)
-      ? sharing.entryFilter
-      : undefined;
+    const roleVisibilityFilter = hasOperatorBoundary(client, cfg) ? sharing.entryFilter : undefined;
     const restrictVisibility = restrictIncognito || !isGatewayAdmin(client);
     const canSearchSessionKey = (sessionKey: string, sessionAgentId = agentId) => {
       if (
@@ -113,9 +111,9 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
       });
       return Boolean(
         target &&
-          (resolveSessionVisibility(target.entry) === "restricted"
-            ? sharing.canReadTarget(target)
-            : (roleVisibilityFilter?.(target.storeKey, target.entry) ?? true)),
+        (resolveSessionVisibility(target.entry) === "restricted"
+          ? sharing.canReadTarget(target)
+          : (roleVisibilityFilter?.(target.storeKey, target.entry) ?? true)),
       );
     };
     if (requestedAgentId && !params.sessionKeys && configured) {

@@ -4,6 +4,7 @@ import { peekSessionMcpRuntime } from "../agents/agent-bundle-mcp-manager-api.js
 import { runWithSessionMcpRequestSignal } from "../agents/agent-bundle-mcp-request-context.js";
 import { buildMcpAppSandboxPath, resolveMcpAppSandboxPort } from "../agents/mcp-app-sandbox.js";
 import { getMcpAppViewLease, type McpAppViewLease } from "../agents/mcp-ui-resource.js";
+import { getRuntimeConfig } from "../config/config.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
 import { respondPlainText } from "./control-ui-http-utils.js";
@@ -26,7 +27,6 @@ import {
   canUseSessionBearerCapability,
   type SessionBearerAccessBinding,
 } from "./session-bearer-access.js";
-import { getRuntimeConfig } from "../config/config.js";
 
 const MCP_APP_STANDALONE_TICKET_SCOPE = "mcp-app-standalone-view";
 const MCP_APP_STANDALONE_INITIAL_LOAD_TIMEOUT_MS = 30_000;

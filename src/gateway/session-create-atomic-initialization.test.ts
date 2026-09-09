@@ -102,9 +102,7 @@ describe("atomic Gateway session initialization", () => {
           allowedCapabilities: [],
         },
       });
-      expect(
-        listSessionMembers({ agentId: thread.agentId, sessionKey: thread.key }),
-      ).toEqual([
+      expect(listSessionMembers({ agentId: thread.agentId, sessionKey: thread.key })).toEqual([
         expect.objectContaining({
           identity: { type: "agent", id: "same-id" },
           addedBy: "same-id",

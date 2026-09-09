@@ -1,5 +1,6 @@
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
+import { SESSION_VISIBILITY_VALUES } from "./sessions-sharing-values.js";
 import {
   SessionMemberAddParamsSchema,
   SessionMembersListEvidenceResultSchema,
@@ -8,7 +9,6 @@ import {
   SessionSharingEventSchema,
   SessionVisibilitySetParamsSchema,
 } from "./sessions-sharing.js";
-import { SESSION_VISIBILITY_VALUES } from "./sessions-sharing-values.js";
 
 const baseEvent = {
   action: "visibility",

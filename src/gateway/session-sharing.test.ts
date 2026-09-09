@@ -340,9 +340,9 @@ describe("session sharing policy", () => {
       expect(
         authorizeSessionSharingTarget({ cfg, client: writer, target: restrictedTarget }),
       ).toMatchObject({ details: { code: "SESSION_PARTICIPATION_REQUIRED" } });
-      expect(
-        canReceiveSessionEvent({ cfg, client: writer, sessionKeys: [sessionKey] }),
-      ).toBe(false);
+      expect(canReceiveSessionEvent({ cfg, client: writer, sessionKeys: [sessionKey] })).toBe(
+        false,
+      );
       expect(
         authorizeResolvedSessionMutation({
           cfg,

@@ -45,7 +45,10 @@ export function migrateSessionMembersSchema(database: DatabaseSync, pathname: st
   if (tableExists(database, MIGRATION_TABLE)) {
     throw new Error(`Session member migration table already exists: ${MIGRATION_TABLE}`);
   }
-  database.exec("DROP INDEX idx_agent_session_members_identity;");
+  database.exec(
+    /* sqlite-allow-raw -- Versioned index removal inside the maintenance transaction. */
+    "DROP INDEX idx_agent_session_members_identity;",
+  );
   const dependencies = database // sqlite-allow-raw -- Inspect historical dependents before rebuilding.
     .prepare(`SELECT name FROM sqlite_schema
       WHERE (type IN ('trigger', 'index') AND tbl_name = 'session_members' AND sql IS NOT NULL)

@@ -334,7 +334,9 @@ test("restricted reads require typed membership and never trust participant hist
   }
 
   const visible = await readFor(memberId);
-  expect(visible.searched.payload?.results.map((result) => result.sessionKey)).toEqual([sessionKey]);
+  expect(visible.searched.payload?.results.map((result) => result.sessionKey)).toEqual([
+    sessionKey,
+  ]);
   expect(visible.listedAll.sessions.find((session) => session.key === sessionKey)).toMatchObject({
     visibility: "restricted",
     roomKind: "group-dm",

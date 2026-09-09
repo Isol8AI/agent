@@ -1,6 +1,6 @@
 import { withLegacySessionParticipantsSchema } from "./openclaw-agent-participants-migration.js";
-import { withLegacySessionMembersSchema } from "./openclaw-agent-session-members-migration.js";
 import { AGENT_SCHEMA_WITHOUT_PROGRESS_CARD_SQL } from "./openclaw-agent-progress-card-schema.js";
+import { withLegacySessionMembersSchema } from "./openclaw-agent-session-members-migration.js";
 
 const SHARING_SCHEMA_START = "CREATE TABLE IF NOT EXISTS session_members (";
 const SHARING_SCHEMA_END = "CREATE TABLE IF NOT EXISTS heartbeat_outcomes (";

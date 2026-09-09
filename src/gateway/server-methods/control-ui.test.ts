@@ -493,10 +493,7 @@ describe("controlUi.sessionPreview", () => {
         sessionMutationAuthorization: {
           assertCurrent: () => {
             if (
-              !isSessionMember(
-                { agentId: "main", sessionKey },
-                { type: "profile", id: memberId },
-              )
+              !isSessionMember({ agentId: "main", sessionKey }, { type: "profile", id: memberId })
             ) {
               throw new Error("session authority revoked");
             }

@@ -9,8 +9,8 @@ import {
   SessionParticipantSchema,
   SessionParticipantIdentitySchema,
 } from "./session-participant.js";
-import { SessionSharingRoleSchema, SessionVisibilitySchema } from "./sessions-sharing-values.js";
 import { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";
+import { SessionSharingRoleSchema, SessionVisibilitySchema } from "./sessions-sharing-values.js";
 
 export const SessionPermissionModeSchema = Type.Union([
   Type.Literal("read-only"),

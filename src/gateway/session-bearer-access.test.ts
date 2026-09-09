@@ -4,10 +4,7 @@ import { addSessionMember, removeSessionMember } from "../config/sessions/sessio
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
-import {
-  canUseSessionBearerAccess,
-  captureSessionBearerAccess,
-} from "./session-bearer-access.js";
+import { canUseSessionBearerAccess, captureSessionBearerAccess } from "./session-bearer-access.js";
 import { sharingPolicyClient } from "./session-sharing.test-utils.js";
 
 afterEach(() => closeOpenClawAgentDatabasesForTest());

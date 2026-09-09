@@ -420,8 +420,7 @@ export function writeSessionEntry(
     normalizedEntry.roomKind = canonicalPreviousEntry.roomKind;
     normalizedEntry.threadOrigin = canonicalPreviousEntry.threadOrigin;
     normalizedEntry.sandbox = "required";
-    normalizedEntry.privateRoomExecutionPolicy =
-      canonicalPreviousEntry.privateRoomExecutionPolicy;
+    normalizedEntry.privateRoomExecutionPolicy = canonicalPreviousEntry.privateRoomExecutionPolicy;
   }
   if (canonicalPreviousEntry?.sandbox === "required") {
     if (

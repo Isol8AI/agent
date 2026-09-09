@@ -185,16 +185,16 @@ export function resolveAuthorizedArtifactSession(
   });
   const restrictedDenied = Boolean(
     target &&
-      resolveSessionVisibility(target.entry) === "restricted" &&
-      !prepareSessionSharing({ client, cfg: cfg ?? {} }).canReadTarget(target),
+    resolveSessionVisibility(target.entry) === "restricted" &&
+    !prepareSessionSharing({ client, cfg: cfg ?? {} }).canReadTarget(target),
   );
   const roleVisibilityDenied = Boolean(
     restrictedDenied ||
-      (cfg &&
-        hasOperatorBoundary(client, cfg) &&
-        target &&
-        resolveSessionVisibility(target.entry) !== "restricted" &&
-        createSessionListEntryFilter({ client, cfg })?.(target.storeKey, target.entry) === false),
+    (cfg &&
+      hasOperatorBoundary(client, cfg) &&
+      target &&
+      resolveSessionVisibility(target.entry) !== "restricted" &&
+      createSessionListEntryFilter({ client, cfg })?.(target.storeKey, target.entry) === false),
   );
   if (!error && !roleVisibilityDenied) {
     return resolved;

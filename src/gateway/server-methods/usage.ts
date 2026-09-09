@@ -25,10 +25,7 @@ import {
 import { readGatewayAccessRevision } from "../gateway-access-revision.js";
 import { operatorSessionCap } from "../operator-role-policy.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
-import {
-  gatewayClientSessionMemberIdentity,
-  isGatewayAdmin,
-} from "../session-sharing.js";
+import { gatewayClientSessionMemberIdentity, isGatewayAdmin } from "../session-sharing.js";
 import { loadUsageStatusStaleWhileRevalidate } from "./models-auth-status-usage-cache.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import {
@@ -176,13 +173,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     });
     respond(true, summary, undefined);
   },
-  "sessions.usage": async ({
-    respond,
-    params,
-    context,
-    client,
-    sessionMutationAuthorization,
-  }) => {
+  "sessions.usage": async ({ respond, params, context, client, sessionMutationAuthorization }) => {
     if (!assertValidParams(params, validateSessionsUsageParams, "sessions.usage", respond)) {
       return;
     }
@@ -398,12 +389,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     sessionMutationAuthorization?.assertCurrent();
     respond(true, timeseries, undefined);
   },
-  "sessions.usage.logs": async ({
-    respond,
-    params,
-    context,
-    sessionMutationAuthorization,
-  }) => {
+  "sessions.usage.logs": async ({ respond, params, context, sessionMutationAuthorization }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "key is required for logs"));

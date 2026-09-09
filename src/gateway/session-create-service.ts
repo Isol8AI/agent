@@ -46,7 +46,6 @@ import type {
   SessionEntry,
   SessionToolOverrides,
 } from "../config/sessions.js";
-import { addInitialSessionMembersInTransaction } from "../config/sessions/session-sharing-store.js";
 import { resolveAgentMainSessionKey } from "../config/sessions/main-session.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import {
@@ -65,6 +64,7 @@ import {
   type SessionCreatedVia,
 } from "../config/sessions/session-entry-provenance.js";
 import { inheritSessionSelection } from "../config/sessions/session-entry-selection.js";
+import { addInitialSessionMembersInTransaction } from "../config/sessions/session-sharing-store.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   createInternalHookEvent,
@@ -481,9 +481,7 @@ export async function createGatewaySession(params: {
     : [];
   if (
     hasRestrictedRoomContract &&
-    roomMembers?.some(
-      (identity) => !isKnownSessionMemberIdentity(knownRoomIdentities, identity),
-    )
+    roomMembers?.some((identity) => !isKnownSessionMemberIdentity(knownRoomIdentities, identity))
   ) {
     return {
       ok: false,

@@ -31,6 +31,7 @@ import {
 } from "../control-ui-public-session-token.js";
 import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
 import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
+import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   isKnownSessionMemberIdentity,
   knownSessionIdentities,
@@ -40,7 +41,6 @@ import {
   sharingActorStorageRef,
   type SharingActorFacts,
 } from "../session-sharing-identities.js";
-import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   allowedSessionVisibilities,
   canManageSessionSharing,
@@ -173,7 +173,6 @@ function requireCurrentManagedTarget(params: {
   }
   return current;
 }
-
 
 function publishSharingChange(params: {
   context: GatewayRequestContext;

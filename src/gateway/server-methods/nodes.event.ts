@@ -6,12 +6,12 @@ import {
 import { recordPairedNodeHostStats } from "../../infra/device-pairing-node.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import type { NodeEventContext } from "../server-node-events-types.js";
+import { resolveSessionSharingTarget, resolveSessionVisibility } from "../session-sharing.js";
 import {
   resolveDispatchableNodeSession,
   respondPairingChanged,
   respondRestrictedNodeSession,
 } from "./nodes.shared.js";
-import { resolveSessionSharingTarget, resolveSessionVisibility } from "../session-sharing.js";
 import { respondUnavailableOnThrow } from "./response.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";

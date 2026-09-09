@@ -39,8 +39,7 @@ export const sessionsPreviewHandler: GatewayRequestHandler = async ({
 
   const cfg = context.getRuntimeConfig();
   const previews: SessionsPreviewEntry[] = [];
-  const authorities: Array<{ authority: SessionPreviewAuthority; index: number; key: string }> =
-    [];
+  const authorities: Array<{ authority: SessionPreviewAuthority; index: number; key: string }> = [];
   for (const key of keys) {
     if (previews.length > 0) {
       await yieldToEventLoop();

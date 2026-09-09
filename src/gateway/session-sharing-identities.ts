@@ -9,8 +9,8 @@ import { loadCombinedSessionStoreForGatewayCore } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { listProfiles } from "../state/user-profiles.js";
 
-export const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
-export const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
+const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
+const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
 const LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS = new Set(["local-operator", "operator.admin"]);
 
 export type SharingActorFacts =

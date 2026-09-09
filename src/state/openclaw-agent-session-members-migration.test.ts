@@ -26,9 +26,7 @@ describe("session member identity migration", () => {
 
     expect(
       database
-        .prepare(
-          "SELECT identity_type, identity_id, added_by, added_at FROM session_members",
-        )
+        .prepare("SELECT identity_type, identity_id, added_by, added_at FROM session_members")
         .get(),
     ).toEqual({
       identity_type: "profile",

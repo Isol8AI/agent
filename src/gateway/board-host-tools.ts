@@ -31,8 +31,8 @@ import { cronHandlers } from "./server-methods/cron.js";
 import { healthHandlers } from "./server-methods/health.js";
 import { sessionReadHandlers } from "./server-methods/sessions-read.js";
 import type { GatewayRequestHandlers } from "./server-methods/types.js";
-import { captureSessionBearerAccess } from "./session-bearer-access.js";
 import { usageHandlers } from "./server-methods/usage.js";
+import { captureSessionBearerAccess } from "./session-bearer-access.js";
 import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
 import { resolveSessionStoreKey } from "./session-store-key.js";
 

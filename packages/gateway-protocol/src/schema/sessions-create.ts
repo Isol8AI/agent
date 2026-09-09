@@ -3,12 +3,12 @@ import { closedObject } from "./closed-object.js";
 import { HumanMentionsSchema } from "./human-mentions.js";
 import { ChatAttachmentsSchema } from "./logs-chat.js";
 import { NonEmptyString, SessionLabelString } from "./primitives.js";
+import { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";
 import {
   SessionPermissionModeSchema,
   SessionRepositorySourceSchema,
   SessionToolOverridesSchema,
 } from "./sessions-row.js";
-import { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";
 import { SessionMemberIdentitySchema, SessionVisibilitySchema } from "./sessions-sharing-values.js";
 
 export { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";

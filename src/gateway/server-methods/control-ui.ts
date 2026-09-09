@@ -19,8 +19,8 @@ import {
 } from "../control-ui-github-preview.js";
 import { parseControlUiSessionPullRequestsSubscribeParams } from "../control-ui-session-pr-subscriptions.js";
 import { requestCurrentGitHubOAuthRefresh } from "../github-oauth-lifecycle.js";
-import { resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId } from "../session-request-agent.js";
 import { resolveSessionPreviewAuthority } from "../session-preview-authority.js";
+import { resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId } from "../session-request-agent.js";
 import { buildGatewaySessionRow } from "../session-utils.js";
 import { resolveAgentIdOrRespondError } from "./agent-id-shared.js";
 import { loadSessionEntriesForTarget } from "./sessions-shared.js";

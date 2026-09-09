@@ -69,16 +69,16 @@ import {
   type ManagedImageRecord,
 } from "./managed-image-record-store.js";
 import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
+import {
+  canUseSessionBearerAccess,
+  type SessionBearerAccessBinding,
+} from "./session-bearer-access.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "./session-request-agent.js";
 import {
   readSessionMessagesMatchingIdAsync,
   readSessionMessagesWithSourceAsync,
 } from "./session-transcript-readers.js";
 import { loadGatewaySessionEntryReadOnly } from "./session-utils.js";
-import {
-  canUseSessionBearerAccess,
-  type SessionBearerAccessBinding,
-} from "./session-bearer-access.js";
 
 const OUTGOING_IMAGE_ROUTE_PREFIX = "/api/chat/media/outgoing";
 const DEFAULT_TRANSIENT_OUTGOING_IMAGE_TTL_MS = 15 * 60 * 1000;
@@ -1785,9 +1785,7 @@ export async function handleManagedOutgoingMediaHttpRequest(
       res.setHeader("referrer-policy", "no-referrer");
       res.setHeader(
         "cache-control",
-        hasValidMediaTicket
-          ? "private, no-store"
-          : "private, max-age=31536000, immutable",
+        hasValidMediaTicket ? "private, no-store" : "private, max-age=31536000, immutable",
       );
       res.setHeader(
         "content-disposition",

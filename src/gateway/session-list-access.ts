@@ -56,10 +56,7 @@ export function createAuthorizedSessionListEntryFilter(params: {
   const membershipKeys = new Set<string>();
   const memberIdentity = gatewayClientSessionMemberIdentity(params.client);
   if (memberIdentity) {
-    const groups = new Map<
-      string,
-      { agentId: string; sessionKeys: string[]; storePath: string }
-    >();
+    const groups = new Map<string, { agentId: string; sessionKeys: string[]; storePath: string }>();
     for (const { target } of restrictedTargets) {
       const identity = `${target.storeTarget.agentId}\0${target.storePath}`;
       const group = groups.get(identity) ?? {

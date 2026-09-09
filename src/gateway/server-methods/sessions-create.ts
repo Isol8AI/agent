@@ -8,7 +8,6 @@ import {
   errorShape,
   missingScopeErrorShape,
   validateSessionsCreateParams,
-  validateSessionsRoomCreateParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { insideGitCheckout } from "../../agents/worktrees/git.js";
@@ -49,11 +48,12 @@ import { chatHandlers } from "./chat.js";
 import { resolveRegisteredCatalogCreateTarget } from "./session-catalog.js";
 import { emitSessionsChanged } from "./session-change-event.js";
 import { registerCreatedSessionCategory } from "./session-create-category.js";
-import { idempotentSessionCreate } from "./session-create-idempotency.js";
+import { finalizeSessionCreateHandlers } from "./session-create-idempotency.js";
 import {
   resolveSessionCreateInitialTurn,
   isFreshChatSendStarted,
 } from "./session-create-initial-turn.js";
+import * as privateRoomCreate from "./session-create-private-room.js";
 import {
   normalizeSessionProjectGitUrl,
   prepareSessionRepositoryWorkspace,
@@ -61,7 +61,6 @@ import {
   validateSessionProjectPreparation,
 } from "./session-create-project.js";
 import { prepareSessionCreateFilesystemRoot } from "./session-create-root.js";
-import { validatePrivateRoomCreation } from "./session-create-private-room.js";
 import { resolveOperatorSessionCreation } from "./session-creation-provenance.js";
 import { sessionLog } from "./sessions-shared.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -85,12 +84,10 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
-    const privateRoomCreation = validatePrivateRoomCreation(p);
-    if (privateRoomCreation.error) {
-      respond(false, undefined, privateRoomCreation.error);
+    const hasRestrictedRoomContract = privateRoomCreate.validate(p, respond);
+    if (hasRestrictedRoomContract === null) {
       return;
     }
-    const hasRestrictedRoomContract = privateRoomCreation.restricted;
     const parentSessionKey = normalizeOptionalString(p.parentSessionKey);
     const sessionCreation = prepareSkillLibrarySessionCreation(
       client,
@@ -196,15 +193,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       hasInitialTurn,
       message: initialMessage,
     } = initialTurn;
-    if (hasRestrictedRoomContract && hasInitialTurn) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.INVALID_REQUEST,
-          "restricted room creation cannot start a model run; append content separately",
-        ),
-      );
+    if (!privateRoomCreate.allowsInitialTurn(hasRestrictedRoomContract, hasInitialTurn, respond)) {
       return;
     }
     const repositoryCreation = resolveSessionRepositoryCreation(p, hasInitialTurn);
@@ -590,10 +579,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       ...(client?.internal?.operatorRoleActor
         ? { operatorRoleActor: client.internal.operatorRoleActor }
         : {}),
-      visibility: p.visibility,
-      roomKind: p.roomKind,
-      members: p.members,
-      threadOrigin: p.threadOrigin,
+      ...privateRoomCreate.protocolFields(p),
       allowExistingModelSelection,
       parentSessionKey,
       spawnDepth: p.spawnDepth,
@@ -729,23 +715,4 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
   },
 };
 
-sessionCreateHandlers["sessions.create"] = idempotentSessionCreate(
-  expectDefined(sessionCreateHandlers["sessions.create"], "sessions.create handler"),
-);
-
-sessionCreateHandlers["sessions.room.create"] = async (options) => {
-  if (
-    !assertValidParams(
-      options.params,
-      validateSessionsRoomCreateParams,
-      "sessions.room.create",
-      options.respond,
-    )
-  ) {
-    return;
-  }
-  await expectDefined(
-    sessionCreateHandlers["sessions.create"],
-    "sessions.create handler",
-  )(options);
-};
+finalizeSessionCreateHandlers(sessionCreateHandlers);

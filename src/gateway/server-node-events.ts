@@ -746,8 +746,7 @@ export const handleNodeEvent = async (
         return restrictedNodeSessionResult(evt.event);
       }
       const isRequestCurrent = async () =>
-        (await isNodeEventConnectionCurrent(opts)) &&
-        isNodeSessionAccessCurrent(ctx, canonicalKey);
+        (await isNodeEventConnectionCurrent(opts)) && isNodeSessionAccessCurrent(ctx, canonicalKey);
       if (resolveAgentHarnessSessionContextError(canonicalKey, entry)) {
         return undefined;
       }

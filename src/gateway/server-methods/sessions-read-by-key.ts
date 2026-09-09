@@ -33,10 +33,12 @@ function canReadLoadedEntry(params: {
   storePath: string;
 }): boolean {
   if (resolveSessionVisibility(params.entry) !== "restricted") {
-    return createRoleVisibilityFilter(params.client, params.cfg)?.(
-      params.target.canonicalKey,
-      params.entry,
-    ) ?? true;
+    return (
+      createRoleVisibilityFilter(params.client, params.cfg)?.(
+        params.target.canonicalKey,
+        params.entry,
+      ) ?? true
+    );
   }
   return prepareSessionSharing({ client: params.client, cfg: params.cfg }).canReadTarget({
     agentId: params.target.agentId,
@@ -65,13 +67,13 @@ function filterReadableChildSessions(params: {
     });
     return Boolean(
       child.entry &&
-        canReadLoadedEntry({
-          client: params.client,
-          cfg: params.cfg,
-          entry: child.entry,
-          target: child.target,
-          storePath: child.storePath,
-        }),
+      canReadLoadedEntry({
+        client: params.client,
+        cfg: params.cfg,
+        entry: child.entry,
+        target: child.target,
+        storePath: child.storePath,
+      }),
     );
   });
   return readable?.length ? readable : undefined;

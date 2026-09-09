@@ -17,8 +17,8 @@ import {
   withMcpAppActiveView,
 } from "../mcp-app-operations.js";
 import { createMcpAppStandaloneTicket } from "../mcp-app-standalone.js";
-import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { captureSessionBearerAccess } from "../session-bearer-access.js";
+import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 function requireString(params: Record<string, unknown>, key: string): string {
@@ -172,60 +172,46 @@ export const mcpAppHandlers: GatewayRequestHandlers = {
     });
   },
   "mcp.app.callTool": async ({ respond, params, context, sessionMutationAuthorization }) => {
-    await handle(
-      respond,
-      async () => {
-        const result = await runOperation(
-          params,
-          {
-            method: "tools/call",
-            params: {
-              name: requireString(params, "toolName"),
-              arguments: (params.arguments ?? {}) as Record<string, unknown>,
-            },
+    await handle(respond, async () => {
+      const result = await runOperation(
+        params,
+        {
+          method: "tools/call",
+          params: {
+            name: requireString(params, "toolName"),
+            arguments: (params.arguments ?? {}) as Record<string, unknown>,
           },
-          context.getRuntimeConfig(),
-        );
-        sessionMutationAuthorization?.assertCurrent();
-        return result;
-      },
-    );
+        },
+        context.getRuntimeConfig(),
+      );
+      sessionMutationAuthorization?.assertCurrent();
+      return result;
+    });
   },
   "mcp.app.listTools": async ({ respond, params, context, sessionMutationAuthorization }) => {
-    await handle(
-      respond,
-      async () => {
-        const result = await runOperation(
-          params,
-          { method: "tools/list", params: optionalCursor(params) ?? {} },
-          context.getRuntimeConfig(),
-        );
-        sessionMutationAuthorization?.assertCurrent();
-        return result;
-      },
-    );
+    await handle(respond, async () => {
+      const result = await runOperation(
+        params,
+        { method: "tools/list", params: optionalCursor(params) ?? {} },
+        context.getRuntimeConfig(),
+      );
+      sessionMutationAuthorization?.assertCurrent();
+      return result;
+    });
   },
-  "mcp.app.listResources": async ({
-    respond,
-    params,
-    context,
-    sessionMutationAuthorization,
-  }) => {
-    await handle(
-      respond,
-      async () => {
-        const result = await runOperation(
-          params,
-          {
-            method: "resources/list",
-            params: optionalCursor(params) ?? {},
-          },
-          context.getRuntimeConfig(),
-        );
-        sessionMutationAuthorization?.assertCurrent();
-        return result;
-      },
-    );
+  "mcp.app.listResources": async ({ respond, params, context, sessionMutationAuthorization }) => {
+    await handle(respond, async () => {
+      const result = await runOperation(
+        params,
+        {
+          method: "resources/list",
+          params: optionalCursor(params) ?? {},
+        },
+        context.getRuntimeConfig(),
+      );
+      sessionMutationAuthorization?.assertCurrent();
+      return result;
+    });
   },
   "mcp.app.listResourceTemplates": async ({
     respond,
@@ -233,42 +219,31 @@ export const mcpAppHandlers: GatewayRequestHandlers = {
     context,
     sessionMutationAuthorization,
   }) => {
-    await handle(
-      respond,
-      async () => {
-        const result = await runOperation(
-          params,
-          {
-            method: "resources/templates/list",
-            params: optionalCursor(params) ?? {},
-          },
-          context.getRuntimeConfig(),
-        );
-        sessionMutationAuthorization?.assertCurrent();
-        return result;
-      },
-    );
+    await handle(respond, async () => {
+      const result = await runOperation(
+        params,
+        {
+          method: "resources/templates/list",
+          params: optionalCursor(params) ?? {},
+        },
+        context.getRuntimeConfig(),
+      );
+      sessionMutationAuthorization?.assertCurrent();
+      return result;
+    });
   },
-  "mcp.app.readResource": async ({
-    respond,
-    params,
-    context,
-    sessionMutationAuthorization,
-  }) => {
-    await handle(
-      respond,
-      async () => {
-        const result = await runOperation(
-          params,
-          {
-            method: "resources/read",
-            params: { uri: requireString(params, "uri") },
-          },
-          context.getRuntimeConfig(),
-        );
-        sessionMutationAuthorization?.assertCurrent();
-        return result;
-      },
-    );
+  "mcp.app.readResource": async ({ respond, params, context, sessionMutationAuthorization }) => {
+    await handle(respond, async () => {
+      const result = await runOperation(
+        params,
+        {
+          method: "resources/read",
+          params: { uri: requireString(params, "uri") },
+        },
+        context.getRuntimeConfig(),
+      );
+      sessionMutationAuthorization?.assertCurrent();
+      return result;
+    });
   },
 };

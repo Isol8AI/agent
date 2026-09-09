@@ -33,12 +33,12 @@ export function createGatewayConnectionState(params: {
     const client = clients.getByConnectionId(connId);
     return Boolean(
       client &&
-        canReceiveSessionEvent({
-          cfg: loadRuntimeConfig(),
-          client,
-          event: "controlUi.sessionPullRequests.changed",
-          sessionKeys: [sessionKey],
-        }),
+      canReceiveSessionEvent({
+        cfg: loadRuntimeConfig(),
+        client,
+        event: "controlUi.sessionPullRequests.changed",
+        sessionKeys: [sessionKey],
+      }),
     );
   };
   const sessionEventSubscribers = createSessionEventSubscriberRegistry(isConnectionActive);

@@ -63,14 +63,12 @@ export function canUseSessionBearerAccess(params: {
   }
   if (
     binding.admin === true &&
-    (
-      !binding.reader ||
+    (!binding.reader ||
       !params.cfg.gateway?.roles ||
       (binding.reader.type === "profile" &&
         resolveOperatorRolePolicyForProfile(binding.reader.id, params.cfg)?.scopes.includes(
           "operator.admin",
-        ) === true)
-    )
+        ) === true))
   ) {
     return true;
   }

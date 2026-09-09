@@ -6,8 +6,8 @@ import {
   resolveBoardWidgetContentKindResourceUrls,
 } from "../plugins/board-widget-content-kinds.js";
 import { requireBoardViewTicketAuthority, verifyBoardViewTicket } from "./board-view-ticket.js";
-import type { SessionBearerAccessBinding } from "./session-bearer-access.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
+import type { SessionBearerAccessBinding } from "./session-bearer-access.js";
 
 type AuthorizedBoardWidgetView = BoardSessionTarget & {
   name: string;
