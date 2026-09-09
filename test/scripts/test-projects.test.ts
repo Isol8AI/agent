@@ -1175,9 +1175,9 @@ describe("scripts/test-projects changed-target routing", () => {
         "test/scripts/docker-channel-promote.test.ts",
         "test/scripts/docker-release-artifacts.test.ts",
         "test/scripts/vercel-container-registry-publish.test.ts",
-        "test/scripts/ci-workflow-guards.test.ts",
         "test/scripts/isol8-candidate-release.test.ts",
         "test/scripts/release-plan-producer.test.ts",
+        "test/scripts/ci-workflow-guards.test.ts",
       ],
     },
     {
