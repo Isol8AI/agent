@@ -598,9 +598,6 @@ export function canReceiveSessionEvent(params: {
   }
   const operatorActor = resolveGatewayOperatorRoleActor(client);
   const identity = sharingIdentity(client, operatorActor);
-  if (!identity) {
-    return false;
-  }
   const hidesForeignSessions = operatorSessionCap(client, cfg) === "none";
   const sharing = prepareSessionSharing({ cfg, client });
   // Discovery remains lazy; these facts belong only to this recipient check, never a socket send.
@@ -618,11 +615,21 @@ export function canReceiveSessionEvent(params: {
       return false;
     }
     if (snapshot.visibility === "restricted") {
+      if (!identity) {
+        return false;
+      }
       const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
       if (!target) {
         return false;
       }
       return sharing.canReadTarget(target);
+    }
+    if (!identity) {
+      return (
+        (!cfg.gateway?.roles || operatorActor?.kind === "system") &&
+        event !== "session.suggestion" &&
+        event !== "session.typing"
+      );
     }
     if (snapshot.visibility !== "draft" || isCreator) {
       return true;
@@ -635,6 +642,9 @@ export function canReceiveSessionEvent(params: {
   });
   if (!visible || event !== "session.suggestion") {
     return visible;
+  }
+  if (!identity) {
+    return false;
   }
   const authorId =
     params.payload && typeof params.payload === "object"

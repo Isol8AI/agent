@@ -935,6 +935,19 @@ describe("session sharing policy", () => {
     ).toMatchObject({ details: { code: "SESSION_MUTATION_TARGET_REQUIRED" } });
   });
 
+  it("retains identity-less legacy event fanout for shared sessions", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const sessionKey = "agent:main:identityless-shared";
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey },
+        { sessionId: "identityless-shared", updatedAt: 1, visibility: "shared" },
+      );
+      expect(
+        canReceiveSessionEvent({ cfg: {}, client: client({}) as never, sessionKeys: [sessionKey] }),
+      ).toBe(true);
+    });
+  });
+
   it("fails closed for scoped events whose session row was deleted", () => {
     expect(
       canReceiveSessionEvent({
