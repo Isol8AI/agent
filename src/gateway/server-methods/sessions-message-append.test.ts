@@ -13,6 +13,7 @@ import {
   listSessionParticipantsReadOnly,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
+import * as sessionParticipants from "../../config/sessions/session-accessor.sqlite-participants.js";
 import {
   loadTranscriptEventsSync,
   readTranscriptEventId,
@@ -149,6 +150,52 @@ describe("sessions.message.append", () => {
   ])("rejects the caller-owned %s field", async (field) => {
     expect(validateSessionMessageAppendParams({ ...params, [field]: "forged" })).toBe(false);
     expect((await invoke({ [field]: "forged" }))[0]).toBe(false);
+  });
+
+  it("replays semantically identical mentions regardless of object property order", async () => {
+    await withOpenClawTestState({ label: "message-append-mention-order" }, async (state) => {
+      await state.writeConfig(cfg);
+      await seedRoom();
+      const first = receipt(await invoke({ mentions: [{ type: "agent", id: "helper" }] }));
+      const replay = receipt(await invoke({ mentions: [{ id: "helper", type: "agent" }] }));
+      expect(replay).toEqual({ ...first, appended: false });
+      expect(loadTranscriptEventsSync(scope).filter(readTranscriptEventMessage)).toHaveLength(1);
+    });
+  });
+
+  it("publishes and acknowledges a committed message when participant recording fails", async () => {
+    await withOpenClawTestState({ label: "message-append-participant-failure" }, async (state) => {
+      await state.writeConfig(cfg);
+      await seedRoom();
+      const recordParticipant = vi
+        .spyOn(sessionParticipants, "recordSessionParticipant")
+        .mockImplementation(() => {
+          throw new Error("participant projection unavailable");
+        });
+      const publishedIds: string[] = [];
+      const unsubscribe = onInternalSessionTranscriptUpdate((update) => {
+        if (update.sessionKey === scope.sessionKey && update.messageId) {
+          publishedIds.push(update.messageId);
+        }
+      });
+      try {
+        const first = receipt(await invoke());
+        expect(first.appended).toBe(true);
+        expect(recordParticipant).toHaveBeenCalledOnce();
+        expect(publishedIds).toEqual([first.messageId]);
+        expect(
+          loadTranscriptEventsSync(scope)
+            .filter(readTranscriptEventMessage)
+            .map(readTranscriptEventId),
+        ).toEqual([first.messageId]);
+        expect(receipt(await invoke())).toEqual({ ...first, appended: false });
+        expect(recordParticipant).toHaveBeenCalledOnce();
+        expect(publishedIds).toEqual([first.messageId]);
+      } finally {
+        unsubscribe();
+        recordParticipant.mockRestore();
+      }
+    });
   });
 
   it("persists concurrent independent messages on the durable tail, replays receipts, and conflicts on changed content", async () => {

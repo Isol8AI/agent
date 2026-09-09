@@ -178,7 +178,13 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
         ...(request.mentions ? { mentions: request.mentions } : {}),
         // Compare producer-owned bytes even when storage redaction maps different text to the same value.
         messageAppendDigest: createHash("sha256")
-          .update(JSON.stringify([request.text, request.replyToId, request.mentions]))
+          .update(
+            JSON.stringify([
+              request.text,
+              request.replyToId,
+              request.mentions?.map(({ type, id }) => [type, id]),
+            ]),
+          )
           .digest("hex"),
       },
     };
@@ -190,12 +196,16 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
       updateMode: "inline",
       // The canonical owner invokes this only after commit, before publishing session.message.
       onMessageCommitted: (receipt) => {
-        if (
-          receipt.appended &&
-          loadSessionEntryReadOnly({ ...scope, readConsistency: "latest" })?.sessionId ===
-            scope.sessionId
-        ) {
-          recordSessionParticipant(scope, { identity, promptedAt: timestamp });
+        try {
+          if (
+            receipt.appended &&
+            loadSessionEntryReadOnly({ ...scope, readConsistency: "latest" })?.sessionId ===
+              scope.sessionId
+          ) {
+            recordSessionParticipant(scope, { identity, promptedAt: timestamp });
+          }
+        } catch {
+          // Best-effort activity must not suppress a committed message's receipt or publication.
         }
       },
     });
