@@ -1,8 +1,20 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
+import { resolveSessionStorePathCore as resolveStorePath } from "../../config/sessions.js";
+import {
+  persistSessionTranscriptTurn,
+  replaceSessionEntry,
+} from "../../config/sessions/session-accessor.js";
+import {
+  addSessionMember,
+  isSessionMember,
+  removeSessionMember,
+} from "../../config/sessions/session-sharing-store.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { ensureProfileForEmail, setUserProfileRole } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
 import type { GatewayClient } from "./types.js";
 
 const mocks = vi.hoisted(() => ({
@@ -377,6 +389,214 @@ describe("sessions.usage result cache", () => {
         code: "FORBIDDEN",
         message: expect.stringContaining("sessions hidden by your operator role"),
       });
+    });
+  });
+
+  it("does not serve cached restricted usage after membership removal", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const ownerId = ensureProfileForEmail("usage-cache-owner@example.test").id;
+      const memberId = ensureProfileForEmail("usage-cache-member@example.test").id;
+      const sessionKey = "agent:main:usage-cache-restricted";
+      const sessionId = "usage-cache-restricted-session";
+      const storePath = resolveStorePath(undefined, { agentId: "main" });
+      const storeEntry = {
+        sessionId,
+        updatedAt: 200,
+        createdActor: { type: "human" as const, source: "profile" as const, id: ownerId },
+        visibility: "restricted" as const,
+      };
+      await replaceSessionEntry({ agentId: "main", sessionKey, storePath }, storeEntry);
+      addSessionMember(
+        { agentId: "main", sessionKey, storePath },
+        {
+          identity: { type: "profile", id: memberId },
+          addedBy: ownerId,
+          expectedSessionId: sessionId,
+        },
+      );
+      mocks.loadCombinedSessionStoreForGatewayCore.mockReturnValue({
+        targetsBySessionKey: new Map([
+          [
+            sessionKey,
+            {
+              agentId: "main",
+              storeTarget: { agentId: "main", storePath },
+            },
+          ],
+        ]),
+        durableTargets: [],
+        storePath,
+        store: { [sessionKey]: storeEntry },
+      });
+      mocks.discoverAllSessions.mockResolvedValue([
+        { sessionId, sessionFile: "/tmp/restricted-usage.jsonl", mtime: 200 },
+      ]);
+      const cfg: OpenClawConfig = {
+        ...config,
+        gateway: {
+          roles: {
+            default: "writer",
+            definitions: {
+              writer: {
+                sessions: { others: "write" },
+                agents: "*",
+                scopes: ["operator.read", "operator.write"],
+              },
+            },
+          },
+        },
+      };
+      const client: GatewayClient = {
+        connect: {
+          minProtocol: 1,
+          maxProtocol: 1,
+          client: {
+            id: "openclaw-control-ui",
+            version: "test",
+            platform: "test",
+            mode: "webchat",
+          },
+          role: "operator",
+          scopes: ["operator.read", "operator.write"],
+        },
+        authenticatedUserProfile: {
+          profileId: memberId,
+          displayName: null,
+          hasAvatar: false,
+          updatedAt: 1,
+        },
+      };
+
+      const initial = (await runSessionsUsage(baseParams, cfg, client)) as {
+        sessions: Array<{ key: string }>;
+        totals: { totalTokens: number };
+      };
+      expect(initial.sessions.map((session) => session.key)).toEqual([sessionKey]);
+      expect(initial.totals.totalTokens).toBe(10);
+
+      removeSessionMember(
+        { agentId: "main", sessionKey, storePath },
+        { type: "profile", id: memberId },
+        undefined,
+        sessionId,
+      );
+      bumpGatewayAccessRevision();
+      const revoked = (await runSessionsUsage(baseParams, cfg, client)) as typeof initial;
+      expect(revoked.sessions).toEqual([]);
+      expect(revoked.totals.totalTokens).toBe(0);
+      expect(mocks.discoverAllSessions).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("rechecks exact-session authority after an in-flight usage load", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const ownerId = ensureProfileForEmail("usage-flight-owner@example.test").id;
+      const memberId = ensureProfileForEmail("usage-flight-member@example.test").id;
+      const sessionKey = "agent:main:usage-flight-restricted";
+      const sessionId = "usage-flight-restricted-session";
+      const storePath = resolveStorePath(undefined, { agentId: "main" });
+      const storeEntry = {
+        sessionId,
+        updatedAt: 200,
+        createdActor: { type: "human" as const, source: "profile" as const, id: ownerId },
+        visibility: "restricted" as const,
+      };
+      await replaceSessionEntry({ agentId: "main", sessionKey, storePath }, storeEntry);
+      await persistSessionTranscriptTurn(
+        { agentId: "main", sessionKey, sessionId, storePath },
+        {
+          cwd: "/tmp",
+          updateMode: "none",
+          messages: [{ message: { role: "user", content: "Usage" }, now: 100 }],
+        },
+      );
+      addSessionMember(
+        { agentId: "main", sessionKey, storePath },
+        {
+          identity: { type: "profile", id: memberId },
+          addedBy: ownerId,
+          expectedSessionId: sessionId,
+        },
+      );
+      mocks.loadCombinedSessionStoreForGatewayCore.mockReturnValue({
+        targetsBySessionKey: new Map([
+          [sessionKey, { agentId: "main", storeTarget: { agentId: "main", storePath } }],
+        ]),
+        durableTargets: [],
+        storePath,
+        store: { [sessionKey]: storeEntry },
+      });
+      const started = createDeferred();
+      const held = createDeferred();
+      mocks.loadSessionCostSummariesFromCache.mockImplementationOnce(
+        async (params: { sessions: unknown[] }) => {
+          started.resolve();
+          await held.promise;
+          return {
+            summaries: params.sessions.map(() => sessionSummary(10)),
+            cacheStatus: {
+              status: "fresh",
+              cachedFiles: params.sessions.length,
+              pendingFiles: 0,
+              staleFiles: 0,
+            },
+          };
+        },
+      );
+      const respond = vi.fn();
+      const client = {
+        connect: {
+          minProtocol: 1,
+          maxProtocol: 1,
+          client: {
+            id: "openclaw-control-ui",
+            version: "test",
+            platform: "test",
+            mode: "webchat",
+          },
+          role: "operator",
+          scopes: ["operator.read", "operator.write"],
+        },
+        authenticatedUserProfile: {
+          profileId: memberId,
+          displayName: null,
+          hasAvatar: false,
+          updatedAt: 1,
+        },
+      } as GatewayClient;
+      const handler = expectDefined(usageHandlers["sessions.usage"], "sessions.usage handler");
+      const pending = handler({
+        respond,
+        params: { ...baseParams, key: sessionKey },
+        client,
+        context: { getRuntimeConfig: () => config },
+        sessionMutationAuthorization: {
+          assertCurrent: () => {
+            if (
+              !isSessionMember(
+                { agentId: "main", sessionKey, storePath },
+                { type: "profile", id: memberId },
+              )
+            ) {
+              throw new Error("session authority revoked");
+            }
+          },
+          assertTargetCurrent: vi.fn(),
+        },
+      } as never);
+
+      await started.promise;
+      removeSessionMember(
+        { agentId: "main", sessionKey, storePath },
+        { type: "profile", id: memberId },
+        undefined,
+        sessionId,
+      );
+      bumpGatewayAccessRevision();
+      held.resolve();
+
+      await expect(pending).rejects.toThrow("session authority revoked");
+      expect(respond).not.toHaveBeenCalled();
     });
   });
 

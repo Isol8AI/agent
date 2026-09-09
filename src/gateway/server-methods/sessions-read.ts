@@ -40,6 +40,11 @@ import {
 import { hasOperatorBoundary } from "../operator-role-policy.js";
 import { createAuthorizedSessionListEntryFilter } from "../session-list-access.js";
 import {
+  isSessionPreviewAuthorityCurrent,
+  resolveSessionPreviewAuthority,
+  type SessionPreviewAuthority,
+} from "../session-preview-authority.js";
+import {
   resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId,
   tryResolveSessionCompatibilityOwnerAgentId,
 } from "../session-request-agent.js";
@@ -647,11 +652,9 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     }
 
     const cfg = context.getRuntimeConfig();
-    const sharing = prepareSessionSharing({ client, cfg });
-    const roleVisibilityFilter = hasOperatorBoundary(client, cfg)
-      ? sharing.entryFilter
-      : undefined;
     const previews: SessionsPreviewEntry[] = [];
+    const authorities: Array<{ authority: SessionPreviewAuthority; index: number; key: string }> =
+      [];
 
     for (const key of keys) {
       if (previews.length > 0) {
@@ -672,22 +675,22 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
           readOnly: true,
         });
         const entry = resolveCanonicalSessionEntryFromStoreKeys(target.store, target.storeKeys);
-        const sharingTarget = entry
-          ? {
+        const authority = entry?.sessionId
+          ? resolveSessionPreviewAuthority({
+              cfg,
+              client,
+              mode: "operator-boundary",
+              sessionKey: target.canonicalKey,
               agentId: target.agentId,
-              canonicalKey: target.canonicalKey,
-              entry,
-              storeKey: target.canonicalKey,
-              storeKeys: target.storeKeys,
-              storePath: target.storePath,
-            }
+            })
           : null;
-        const canRead =
-          sharingTarget &&
-          (resolveSessionVisibility(sharingTarget.entry) === "restricted"
-            ? sharing.canReadTarget(sharingTarget)
-            : (roleVisibilityFilter?.(sharingTarget.storeKey, sharingTarget.entry) ?? true));
-        if (!entry?.sessionId || !canRead) {
+        if (
+          !entry?.sessionId ||
+          !authority ||
+          authority.sessionId !== entry.sessionId ||
+          authority.canonicalKey !== target.canonicalKey ||
+          authority.storePath !== target.storePath
+        ) {
           previews.push({ key, status: "missing", items: [] });
           continue;
         }
@@ -702,9 +705,24 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
           limit,
           maxChars,
         );
+        authorities.push({ authority, index: previews.length, key });
         previews.push({ key, status: items.length > 0 ? "ok" : "empty", items });
       } catch {
         previews.push({ key, status: "error", items: [] });
+      }
+    }
+
+    const currentCfg = context.getRuntimeConfig();
+    for (const { authority, index, key } of authorities) {
+      if (
+        !isSessionPreviewAuthorityCurrent({
+          authority,
+          cfg: currentCfg,
+          client,
+          mode: "operator-boundary",
+        })
+      ) {
+        previews[index] = { key, status: "missing", items: [] };
       }
     }
 

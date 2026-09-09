@@ -329,6 +329,7 @@ describe("OpenClaw database schema preflight", () => {
   });
 
   it("keeps package schema support metadata aligned", () => {
+    expect(packageJson.openclaw.schemaVersions.agent).toBe(20);
     expect(packageJson.openclaw.schemaVersions).toEqual({
       state: OPENCLAW_STATE_SCHEMA_VERSION,
       agent: OPENCLAW_AGENT_SCHEMA_VERSION,

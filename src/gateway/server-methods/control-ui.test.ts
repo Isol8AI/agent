@@ -10,8 +10,14 @@ import {
   persistSessionTranscriptTurn,
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
+import {
+  addSessionMember,
+  isSessionMember,
+  removeSessionMember,
+} from "../../config/sessions/session-sharing-store.js";
 import type { OpenClawConfig } from "../../config/types.js";
 import { SecretSurfaceUnavailableError } from "../../secrets/runtime-degraded-state.js";
+import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import type { ControlUiGitHubPreview, ControlUiSessionPreview } from "../control-ui-contract.js";
 import { ControlUiGitHubError } from "../control-ui-github-api.js";
@@ -419,6 +425,100 @@ describe("controlUi.sessionPreview", () => {
     )(requestOptions({ sessionKey: "agent:main:missing" }, respond));
 
     expect(respond).toHaveBeenCalledWith(true, { status: "unavailable" }, undefined);
+  });
+
+  it("drops a restricted preview when membership is revoked during loading", async () => {
+    await withOpenClawTestState({ label: "hover-restricted-revocation" }, async () => {
+      const ownerId = ensureProfileForEmail("hover-owner@example.test").id;
+      const memberId = ensureProfileForEmail("hover-member@example.test").id;
+      const sessionKey = "agent:main:hover-restricted";
+      const sessionId = "hover-restricted-session";
+      await replaceSessionEntry(
+        { agentId: "main", sessionKey },
+        {
+          sessionId,
+          updatedAt: 42,
+          createdActor: { type: "human", source: "profile", id: ownerId },
+          visibility: "restricted",
+        },
+      );
+      addSessionMember(
+        { agentId: "main", sessionKey },
+        {
+          identity: { type: "profile", id: memberId },
+          addedBy: ownerId,
+          expectedSessionId: sessionId,
+        },
+      );
+      const started = createDeferred();
+      const held = createDeferred();
+      const loadSessionPreview = vi.fn(async () => {
+        started.resolve();
+        await held.promise;
+        return { agentId: "main", sessionKey, title: "Private title" };
+      });
+      const client = {
+        connId: "hover-member",
+        connect: {
+          minProtocol: 1,
+          maxProtocol: 1,
+          client: {
+            id: "openclaw-control-ui",
+            version: "test",
+            platform: "test",
+            mode: "webchat",
+          },
+          role: "operator",
+          scopes: ["operator.read"],
+        },
+        authenticatedUserProfile: {
+          profileId: memberId,
+          displayName: null,
+          hasAvatar: false,
+          updatedAt: 1,
+        },
+      };
+      const cfg: OpenClawConfig = { agents: { entries: { main: {} } } };
+      const respond = vi.fn<RespondFn>();
+      const handler = expectDefined(
+        createControlUiHandlers(vi.fn(), loadSessionPreview)["controlUi.sessionPreview"],
+        "session preview handler",
+      );
+
+      const pending = handler({
+        ...requestOptions({ sessionKey }, respond, {
+          client: client as never,
+          context: { getRuntimeConfig: () => cfg },
+        }),
+        sessionMutationAuthorization: {
+          assertCurrent: () => {
+            if (
+              !isSessionMember(
+                { agentId: "main", sessionKey },
+                { type: "profile", id: memberId },
+              )
+            ) {
+              throw new Error("session authority revoked");
+            }
+          },
+          assertTargetCurrent: vi.fn(),
+        },
+      } as never);
+      await started.promise;
+      removeSessionMember(
+        { agentId: "main", sessionKey },
+        { type: "profile", id: memberId },
+        undefined,
+        sessionId,
+      );
+      held.resolve();
+      await pending;
+
+      expect(respond).toHaveBeenCalledWith(false, undefined, {
+        code: "UNAVAILABLE",
+        message: "Session preview unavailable",
+      });
+    });
   });
 
   it("rejects malformed preview params", async () => {

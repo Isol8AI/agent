@@ -4,7 +4,10 @@ import {
   recordSessionParticipant,
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
-import { addSessionMember } from "../../config/sessions/session-sharing-store.js";
+import {
+  addSessionMember,
+  removeSessionMember,
+} from "../../config/sessions/session-sharing-store.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
@@ -20,6 +23,7 @@ import {
   listSessions,
   requestContext,
 } from "./sessions-read-cache.test-support.js";
+import { sessionReadHandlers } from "./sessions-read.js";
 
 setupGatewaySessionsHandlerTestHarness();
 afterEach(() => {
@@ -343,6 +347,35 @@ test("restricted reads require typed membership and never trust participant hist
   expect(visible.history.payload?.messages.map((message) => message.content)).toEqual([
     "restricted search needle",
   ]);
+
+  const respond = vi.fn();
+  const previewHandler = sessionReadHandlers["sessions.preview"];
+  if (!previewHandler) {
+    throw new Error("sessions.preview handler unavailable");
+  }
+  const pendingPreview = previewHandler({
+    params: { keys: [sessionKey, parentKey] },
+    client: identifiedClient(memberId),
+    context: requestContext(cfg),
+    respond,
+  } as never);
+  removeSessionMember(
+    { agentId: "main", sessionKey, storePath },
+    { type: "profile", id: memberId },
+    undefined,
+    sessionId,
+  );
+  await pendingPreview;
+  expect(respond).toHaveBeenCalledWith(
+    true,
+    expect.objectContaining({
+      previews: [
+        { key: sessionKey, status: "missing", items: [] },
+        { key: parentKey, status: "empty", items: [] },
+      ],
+    }),
+    undefined,
+  );
 });
 
 test.each(["research", "ops"] as const)(
