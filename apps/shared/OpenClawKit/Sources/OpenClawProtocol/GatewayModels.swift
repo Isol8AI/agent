@@ -12560,6 +12560,26 @@ public struct AuditListResult: Codable, Sendable {
     }
 }
 
+public struct UsersEnsureProfileParams: Codable, Sendable {
+    public let alias: String
+
+    public init(
+        alias: String)
+    {
+        self.alias = alias
+    }
+}
+
+public struct UsersEnsureProfileResult: Codable, Sendable {
+    public let profile: [String: AnyCodable]
+
+    public init(
+        profile: [String: AnyCodable])
+    {
+        self.profile = profile
+    }
+}
+
 public struct UserProfileAuthLink: Codable, Sendable {
     public let provider: String
     public let authprofileid: String

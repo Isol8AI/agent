@@ -99,6 +99,12 @@ describe("listGatewayMethods", () => {
       "claws.monitors",
       "sessions.room.create",
       "sessions.message.append",
+      "sessions.execution.dispatch",
+      "sessions.presence.heartbeat",
+      "sessions.presence.snapshot",
+      "sessions.presence.subscribe",
+      "sessions.presence.unsubscribe",
+      "users.ensureProfile",
     ]);
   });
 

@@ -662,6 +662,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
   ["sessions.presence.snapshot", "sessions-subscriptions", "operator.read", "2026.9"],
   ["sessions.presence.subscribe", "sessions-subscriptions", "operator.read", "2026.9"],
   ["sessions.presence.unsubscribe", "sessions-subscriptions", "operator.read", "2026.9"],
+  ["users.ensureProfile", "users", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
 
 export type CoreGatewayHandlerFamily = Exclude<(typeof CORE_GATEWAY_METHOD_SPECS)[number][1], null>;

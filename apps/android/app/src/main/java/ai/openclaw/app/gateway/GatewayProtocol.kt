@@ -934,6 +934,7 @@ enum class GatewayMethod(
   SessionsPresenceSnapshot("sessions.presence.snapshot"),
   SessionsPresenceSubscribe("sessions.presence.subscribe"),
   SessionsPresenceUnsubscribe("sessions.presence.unsubscribe"),
+  UsersEnsureProfile("users.ensureProfile"),
 }
 
 enum class GatewayEvent(

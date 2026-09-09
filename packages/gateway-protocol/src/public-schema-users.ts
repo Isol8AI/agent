@@ -41,6 +41,8 @@ export {
   UsersGitHubAuthorizeCancelResultSchema,
   UsersGitHubDisconnectParamsSchema,
   UsersGitHubDisconnectResultSchema,
+  UsersEnsureProfileParamsSchema,
+  UsersEnsureProfileResultSchema,
   UsersListParamsSchema,
   UsersListResultSchema,
   UsersPrefsGetParamsSchema,

@@ -70,6 +70,7 @@ describe("method scope resolution", () => {
     ["users.list", ["operator.read"]],
     ["users.self", ["operator.read"]],
     ["users.linkEmail", ["operator.admin"]],
+    ["users.ensureProfile", ["operator.admin"]],
     ["users.setDisplayName", ["operator.write"]],
     ["users.setAvatar", ["operator.write"]],
     ["tasks.get", ["operator.read"]],
@@ -167,6 +168,16 @@ describe("method scope resolution", () => {
     ["conversations.turn.cancel", ["operator.admin"]],
   ])("resolves least-privilege scopes for %s", (method, expected) => {
     expect(resolveLeastPrivilegeOperatorScopesForMethod(method)).toEqual(expected);
+  });
+
+  it("denies users.ensureProfile without authenticated admin scope", () => {
+    expect(authorizeOperatorScopesForMethod("users.ensureProfile", ["operator.write"])).toEqual({
+      allowed: false,
+      missingScope: "operator.admin",
+    });
+    expect(authorizeOperatorScopesForMethod("users.ensureProfile", ["operator.admin"])).toEqual({
+      allowed: true,
+    });
   });
 
   it("leaves node-only pending drain outside operator scopes", () => {
