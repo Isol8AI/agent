@@ -484,7 +484,7 @@ export async function resolveSessionKeyFromResolveParams(params: {
   let rowContext: SessionListRowContext | undefined;
   const matches = filterAndSortSessionEntries({
     cfg,
-    ...(entryFilter ? { entryFilter } : {}),
+    entryFilter,
     store,
     now,
     getRowContext: () => (rowContext ??= buildSessionListRowMetadataContext({ now })),

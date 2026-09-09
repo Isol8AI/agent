@@ -1,5 +1,6 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { validateSessionsDescribeParams } from "../../../packages/gateway-protocol/src/index.js";
+import type { InternalSessionEntry } from "../../config/sessions.js";
 import { hasOperatorBoundary } from "../operator-role-policy.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
@@ -27,7 +28,7 @@ function createRoleVisibilityFilter(
 function canReadLoadedEntry(params: {
   client: Parameters<typeof hasOperatorBoundary>[0];
   cfg: Parameters<typeof hasOperatorBoundary>[1];
-  entry: Parameters<NonNullable<ReturnType<typeof createRoleVisibilityFilter>>>[1];
+  entry: InternalSessionEntry;
   target: { agentId: string; canonicalKey: string; storeKeys: string[] };
   storePath: string;
 }): boolean {

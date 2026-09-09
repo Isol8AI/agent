@@ -6,7 +6,6 @@ import type {
 import { loadCombinedSessionStoreForGatewayCore } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { listProfiles } from "../state/user-profiles.js";
-import { sharingIdentityAsMember } from "./session-sharing-policy.js";
 
 export const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
 export const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
@@ -15,6 +14,14 @@ export type SharingActorFacts =
   | { state: "present"; actor: SessionSharingIdentity }
   | { state: "unknown" }
   | { state: "absent" };
+
+function sharingIdentityAsMember(identity: SessionSharingIdentity): SessionMemberIdentity | null {
+  return identity.type === "human"
+    ? { type: "profile", id: identity.id }
+    : identity.type === "agent"
+      ? { type: "agent", id: identity.id }
+      : null;
+}
 
 export function sharingActorStorageRef(facts: SharingActorFacts): string {
   return facts.state === "present"

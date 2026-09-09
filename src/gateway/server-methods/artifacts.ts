@@ -659,20 +659,20 @@ export const artifactsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const access = captureSessionBearerAccess({
-      cfg: cfg ?? {},
-      client,
-      sessionKey: artifact.sessionKey,
-      ...(admittedQuery.agentId ? { agentId: admittedQuery.agentId } : {}),
-    });
-    const managedUrl =
-      artifact.download.mode === "url" && artifact.url && artifact.sessionKey
-        ? await resolveManagedOutgoingMediaUrlDownload({
-            sessionKey: artifact.sessionKey,
-            url: artifact.url,
-            ...(access ? { access } : {}),
-          })
-        : null;
+    let managedUrl: Awaited<ReturnType<typeof resolveManagedOutgoingMediaUrlDownload>> = null;
+    if (artifact.download.mode === "url" && artifact.url && artifact.sessionKey) {
+      const access = captureSessionBearerAccess({
+        cfg: cfg ?? {},
+        client,
+        sessionKey: artifact.sessionKey,
+        ...(admittedQuery.agentId ? { agentId: admittedQuery.agentId } : {}),
+      });
+      managedUrl = await resolveManagedOutgoingMediaUrlDownload({
+        sessionKey: artifact.sessionKey,
+        url: artifact.url,
+        ...(access ? { access } : {}),
+      });
+    }
     const current = await runArtifactSessionOperation(respond, () => {
       if (!fence) {
         throw artifactScopeNotFound();

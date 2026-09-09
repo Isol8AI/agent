@@ -13,7 +13,6 @@ import {
   type SessionMemberEvidence,
   type SessionSharingEvent,
   type SessionSharingEvidenceEvent,
-  type SessionSharingIdentity,
   type SessionVisibility,
 } from "../../../packages/gateway-protocol/src/index.js";
 import {
@@ -133,14 +132,6 @@ function memberIdentityFromParams(params: {
     return null;
   }
   return identity;
-}
-
-function sharingIdentityAsMember(identity: SessionSharingIdentity): SessionMemberIdentity | null {
-  return identity.type === "human"
-    ? { type: "profile", id: identity.id }
-    : identity.type === "agent"
-      ? { type: "agent", id: identity.id }
-      : null;
 }
 
 function projectPublicSessionShare(params: {

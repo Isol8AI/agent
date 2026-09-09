@@ -117,6 +117,7 @@ import {
   isKnownSessionMemberIdentity,
   knownSessionIdentities,
   sharingActorStorageRef,
+  type SharingActorFacts,
 } from "./session-sharing-identities.js";
 import { isSessionVisibilityAllowed, resolveSessionVisibility } from "./session-sharing.js";
 import {
@@ -471,9 +472,10 @@ export async function createGatewaySession(params: {
       error: errorShape(ErrorCodes.INVALID_REQUEST, "invalid restricted room member identity"),
     };
   }
-  const roomCreatorActor = roomCreator
-    ? ({ state: "present", actor: roomCreator } as const)
-    : ({ state: "absent" } as const);
+  const roomCreatorActor: SharingActorFacts =
+    roomCreator && roomCreatorIdentity
+      ? { state: "present", actor: { ...roomCreator, id: roomCreatorIdentity.id } }
+      : { state: "absent" };
   const knownRoomIdentities = hasRestrictedRoomContract
     ? knownSessionIdentities({ cfg: params.cfg, actor: roomCreatorActor })
     : [];

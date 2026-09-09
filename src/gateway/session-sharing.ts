@@ -623,11 +623,13 @@ export function canReceiveSessionEvent(params: {
     if (event !== "session.typing") {
       return false;
     }
-    const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
-    return target !== null && canManageSessionSharing(sharing.roleForTarget(target));
+    return canManageSessionSharing(sharing.roleForTarget(target));
   });
   if (!visible || event !== "session.suggestion") {
     return visible;
+  }
+  if (!identity) {
+    return false;
   }
   const authorId =
     params.payload && typeof params.payload === "object"
@@ -650,7 +652,7 @@ export function prepareSessionSharing(params: Pick<SessionSharingRoleParams, "cf
   const profileCreator = prepareSessionCreatorProfile(
     memberIdentity?.type === "profile" ? memberIdentity.id : identity?.id,
   );
-  const isCreator = (actor: SessionSharingTarget["entry"]["createdActor"]) =>
+  const isCreator: ReturnType<typeof prepareSessionCreatorProfile> = (actor) =>
     memberIdentity?.type === "agent"
       ? actor?.type === "agent" && actor.id === memberIdentity.id
       : profileCreator(actor);

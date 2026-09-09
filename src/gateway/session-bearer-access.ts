@@ -7,7 +7,7 @@ import {
   isGatewayAdmin,
   resolveSessionSharingTarget,
   resolveSessionVisibility,
-} from "./session-sharing.js";
+} from "./session-sharing-policy.js";
 
 export type SessionBearerAccessBinding = {
   sessionId: string;
