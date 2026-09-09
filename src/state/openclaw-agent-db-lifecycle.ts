@@ -141,9 +141,12 @@ export function retainAgentDatabase(db: DatabaseSync): () => void {
   };
 }
 
-export function closeCachedOpenClawAgentDatabase(database: OpenClawAgentDatabase): void {
-  // Replication readers may remain attached at every close, not only eviction.
-  database.walMaintenance.close({ checkpointMode: "PASSIVE" });
+export function closeCachedOpenClawAgentDatabase(
+  database: OpenClawAgentDatabase,
+  options?: Parameters<OpenClawAgentDatabase["walMaintenance"]["close"]>[0],
+): void {
+  // Ordinary close remains replication-aware; integrity confirmation explicitly detaches WAL.
+  database.walMaintenance.close({ checkpointMode: "PASSIVE", ...options });
   if (database.db.isOpen) {
     database.db.close();
   }
@@ -204,6 +207,7 @@ export function evictLruAgentDatabaseHandles(): void {
 export function closeOpenClawAgentDatabaseByPath(
   pathname: string,
   expectedAgentId?: string,
+  options?: Parameters<OpenClawAgentDatabase["walMaintenance"]["close"]>[0],
 ): boolean {
   // Cache keys are lexical resolved paths. Do not realpath aliases here: a
   // symlink swap must never redirect cleanup onto a different cached database.
@@ -223,7 +227,7 @@ export function closeOpenClawAgentDatabaseByPath(
     return false;
   }
   const incognito = cache.incognito.has(database);
-  closeCachedOpenClawAgentDatabase(database);
+  closeCachedOpenClawAgentDatabase(database, options);
   cache.databases.delete(resolvedPath);
   cache.failures.delete(resolvedPath);
   if (incognito) {

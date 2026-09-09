@@ -98,6 +98,7 @@ async function applyIsol8NativeSetupSeed(
     if (!seed || typeof seed !== "object" || Array.isArray(seed)) {
       throw new Error("Setup seed must be an object");
     }
+    // SAFETY: JSON was checked above to be a non-null, non-array object; values remain unknown.
     const fields = seed as Record<string, unknown>;
     const timestamps: { bootstrapSeededAt?: string; setupCompletedAt?: string } = {};
     for (const key of ["bootstrapSeededAt", "setupCompletedAt"] as const) {
@@ -114,7 +115,7 @@ async function applyIsol8NativeSetupSeed(
     beforePersistentApply?.();
     await fs.unlink(sentinel);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    if (!hasErrnoCode(error, "ENOENT")) {
       workspaceLogger.warn("Isol8 setup seed conversion failed; continuing boot", {
         error: String(error),
       });

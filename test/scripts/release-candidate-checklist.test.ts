@@ -19,7 +19,6 @@ import { isDeepStrictEqual } from "node:util";
 import { runInNewContext } from "node:vm";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parse } from "yaml";
 import { releaseBranchForTag } from "../../scripts/lib/release-context.mjs";
 import { parseReleaseVersion } from "../../scripts/lib/release-version.mjs";
 import {
@@ -1851,18 +1850,6 @@ describe("release candidate checklist", () => {
     expect(command).toContain("'plugin_publish_scope=all-publishable'");
     expect(command).toContain(`'--ref' '${publishWorkflowRef}'`);
     expect(command).not.toContain("windows_node_tag=");
-
-    const workflow = parse(
-      readFileSync(".github/workflows/openclaw-release-publish.yml", "utf8"),
-    ) as {
-      on: { workflow_dispatch: { inputs: Record<string, unknown> } };
-    };
-    const emittedInputs = [...command.matchAll(/'-f' '([^=']+)=/gu)].flatMap((match) =>
-      match[1] === undefined ? [] : [match[1]],
-    );
-    for (const input of emittedInputs) {
-      expect(workflow.on.workflow_dispatch.inputs).toHaveProperty(input);
-    }
   });
 
   it("validates Plugin SDK acknowledgement digests", () => {

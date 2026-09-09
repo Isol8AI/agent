@@ -465,132 +465,161 @@ export async function materializeBundleMcpToolsForRun(params: {
     releaseLease = params.releaseLease ?? runtime.acquireLease?.();
     runtime.markUsed();
     let catalog = params.nonBlocking ? runtime.peekCatalog() : await runtime.getCatalog();
+    let warming: Promise<McpToolCatalog | undefined> | undefined;
     if (!catalog) {
       const releaseWarmLease = runtime.acquireLease?.();
-      void runtime
+      warming = runtime
         .getCatalog()
         .catch(() => undefined)
-        .finally(async () => {
+        .then(async (result) => {
           const { releaseSessionMcpRuntime } = await import("./agent-bundle-mcp-manager-api.js");
           await releaseSessionMcpRuntime({ runtime, releaseLease: releaseWarmLease });
+          return result;
         })
-        .catch(() => recordAgentCleanupFailure());
+        .catch(() => {
+          recordAgentCleanupFailure();
+          return undefined;
+        });
       catalog = { version: 1, generatedAt: Date.now(), servers: {}, tools: [] };
     }
     const reservedToolNames = params.reservedToolNames
       ? Array.from(params.reservedToolNames)
       : undefined;
-    const materializedCatalog = mergeMcpConnectCatalog(catalog, runtime.requesterConnect);
+    let sourceCatalog = catalog;
+    let materializedCatalog = mergeMcpConnectCatalog(sourceCatalog, runtime.requesterConnect);
     const getPrompt = runtime.getPrompt?.bind(runtime);
-    const tools = buildBundleMcpToolsFromCatalog({
-      catalog: materializedCatalog,
-      reservedToolNames,
-      createExecute: (tool) => (toolCallId: string, input: unknown, signal?: AbortSignal) =>
-        runWithSessionMcpRequestSignal(signal, async () => {
-          if (!Object.hasOwn(catalog.servers, tool.serverName)) {
-            const connect = runtime.requesterConnect?.createExecute(tool.serverName);
-            if (connect) {
-              return setMcpCodeModeGuestResultFromAgentResult(await connect(toolCallId, input));
+    const buildTools = () =>
+      buildBundleMcpToolsFromCatalog({
+        catalog: materializedCatalog,
+        reservedToolNames,
+        createExecute: (tool) => (toolCallId: string, input: unknown, signal?: AbortSignal) =>
+          runWithSessionMcpRequestSignal(signal, async () => {
+            if (!Object.hasOwn(sourceCatalog.servers, tool.serverName)) {
+              const connect = runtime.requesterConnect?.createExecute(tool.serverName);
+              if (connect) {
+                return setMcpCodeModeGuestResultFromAgentResult(await connect(toolCallId, input));
+              }
             }
-          }
-          runtime.markUsed();
-          const { serverName, toolName } = tool;
-          const result = await runtime.callTool(serverName, toolName, input);
-          const agentResult = projectMcpCallToolResult(result, {
-            mcpServer: serverName,
-            mcpTool: toolName,
-          });
-          // Requester-scoped servers never mint app views (outlive run; no requester id on view boundary).
-          const scopedServer = runtime.isRequesterScopedServer?.(serverName) === true;
-          if (runtime.mcpAppsEnabled && tool.uiResourceUri && !scopedServer) {
-            const allowedAppToolNames = allowedAppToolsByServer
-              ? (allowedAppToolsByServer.get(serverName) ?? new Set<string>())
-              : undefined;
-            const view = await fetchMcpAppView({
-              runtime,
-              agentId: params.agentId,
-              serverName,
-              toolName,
-              uiResourceUri: tool.uiResourceUri,
-              toolCallId,
-              toolInput: input,
-              toolResult: result,
-              ...(allowedAppToolNames ? { allowedAppToolNames } : {}),
+            runtime.markUsed();
+            const { serverName, toolName } = tool;
+            const result = await runtime.callTool(serverName, toolName, input);
+            const agentResult = projectMcpCallToolResult(result, {
+              mcpServer: serverName,
+              mcpTool: toolName,
             });
-            if (view) {
-              (agentResult.details as Record<string, unknown>).mcpAppPreview =
-                buildMcpAppCanvasPayload({
-                  ...view,
-                  ...(runtime.sessionKey ? { originSessionKey: runtime.sessionKey } : {}),
-                  ...(result["_meta"] !== undefined
-                    ? { resultMetaState: "unavailable" as const }
-                    : {}),
-                });
+            // Requester-scoped servers never mint app views (outlive run; no requester id on view boundary).
+            const scopedServer = runtime.isRequesterScopedServer?.(serverName) === true;
+            if (runtime.mcpAppsEnabled && tool.uiResourceUri && !scopedServer) {
+              const allowedAppToolNames = allowedAppToolsByServer
+                ? (allowedAppToolsByServer.get(serverName) ?? new Set<string>())
+                : undefined;
+              const view = await fetchMcpAppView({
+                runtime,
+                agentId: params.agentId,
+                serverName,
+                toolName,
+                uiResourceUri: tool.uiResourceUri,
+                toolCallId,
+                toolInput: input,
+                toolResult: result,
+                ...(allowedAppToolNames ? { allowedAppToolNames } : {}),
+              });
+              if (view) {
+                (agentResult.details as Record<string, unknown>).mcpAppPreview =
+                  buildMcpAppCanvasPayload({
+                    ...view,
+                    ...(runtime.sessionKey ? { originSessionKey: runtime.sessionKey } : {}),
+                    ...(result["_meta"] !== undefined
+                      ? { resultMetaState: "unavailable" as const }
+                      : {}),
+                  });
+              }
             }
-          }
-          return agentResult;
-        }),
-      createResourceListExecute: runtime.listResources
-        ? (serverName) => (_toolCallId, _input, signal) =>
-            runWithSessionMcpRequestSignal(signal, async () => {
-              runtime.markUsed();
-              return toJsonAgentToolResult({
-                serverName,
-                operation: "resources_list",
-                value: await runtime.listResources?.(serverName),
-              });
-            })
-        : undefined,
-      createResourceReadExecute: runtime.readResource
-        ? (serverName) => (_toolCallId: string, input: unknown, signal?: AbortSignal) =>
-            runWithSessionMcpRequestSignal(signal, async () => {
-              const uri = requireStringArg(input, "uri");
-              runtime.markUsed();
-              return toJsonAgentToolResult({
-                serverName,
-                operation: "resources_read",
-                value: await runtime.readResource?.(serverName, uri),
-              });
-            })
-        : undefined,
-      createPromptListExecute: runtime.listPrompts
-        ? (serverName) => (_toolCallId, _input, signal) =>
-            runWithSessionMcpRequestSignal(signal, async () => {
-              runtime.markUsed();
-              return toJsonAgentToolResult({
-                serverName,
-                operation: "prompts_list",
-                value: await runtime.listPrompts?.(serverName),
-              });
-            })
-        : undefined,
-      createPromptGetExecute: getPrompt
-        ? (serverName) => (_toolCallId: string, input: unknown, signal?: AbortSignal) =>
-            runWithSessionMcpRequestSignal(signal, async () => {
-              runtime.markUsed();
-              return projectMcpGetPromptResult(
-                await getPrompt(
+            return agentResult;
+          }),
+        createResourceListExecute: runtime.listResources
+          ? (serverName) => (_toolCallId, _input, signal) =>
+              runWithSessionMcpRequestSignal(signal, async () => {
+                runtime.markUsed();
+                return toJsonAgentToolResult({
                   serverName,
-                  requireStringArg(input, "name"),
-                  optionalStringRecordArg(input, "arguments"),
-                ),
-                {
-                  mcpServer: serverName,
-                  mcpOperation: "prompts_get",
-                  untrustedMcpOutput: true,
-                },
-              );
-            })
-        : undefined,
-    });
+                  operation: "resources_list",
+                  value: await runtime.listResources?.(serverName),
+                });
+              })
+          : undefined,
+        createResourceReadExecute: runtime.readResource
+          ? (serverName) => (_toolCallId: string, input: unknown, signal?: AbortSignal) =>
+              runWithSessionMcpRequestSignal(signal, async () => {
+                const uri = requireStringArg(input, "uri");
+                runtime.markUsed();
+                return toJsonAgentToolResult({
+                  serverName,
+                  operation: "resources_read",
+                  value: await runtime.readResource?.(serverName, uri),
+                });
+              })
+          : undefined,
+        createPromptListExecute: runtime.listPrompts
+          ? (serverName) => (_toolCallId, _input, signal) =>
+              runWithSessionMcpRequestSignal(signal, async () => {
+                runtime.markUsed();
+                return toJsonAgentToolResult({
+                  serverName,
+                  operation: "prompts_list",
+                  value: await runtime.listPrompts?.(serverName),
+                });
+              })
+          : undefined,
+        createPromptGetExecute: getPrompt
+          ? (serverName) => (_toolCallId: string, input: unknown, signal?: AbortSignal) =>
+              runWithSessionMcpRequestSignal(signal, async () => {
+                runtime.markUsed();
+                return projectMcpGetPromptResult(
+                  await getPrompt(
+                    serverName,
+                    requireStringArg(input, "name"),
+                    optionalStringRecordArg(input, "arguments"),
+                  ),
+                  {
+                    mcpServer: serverName,
+                    mcpOperation: "prompts_get",
+                    untrustedMcpOutput: true,
+                  },
+                );
+              })
+          : undefined,
+      });
+    const tools = buildTools();
     const appTools = buildAppToolPolicyProjections({
       catalog: materializedCatalog,
       modelTools: tools,
       reservedToolNames,
     });
 
+    const ready = warming
+      ?.then((nextCatalog) => {
+        if (disposal || !nextCatalog) {
+          return;
+        }
+        sourceCatalog = nextCatalog;
+        materializedCatalog = mergeMcpConnectCatalog(nextCatalog, runtime.requesterConnect);
+        tools.splice(0, tools.length, ...buildTools());
+        appTools.splice(
+          0,
+          appTools.length,
+          ...buildAppToolPolicyProjections({
+            catalog: materializedCatalog,
+            modelTools: tools,
+            reservedToolNames,
+          }),
+        );
+      })
+      .catch(() => recordAgentCleanupFailure());
+
     return {
       tools,
+      ...(ready ? { ready } : {}),
       appTools,
       ...(catalog.diagnostics && catalog.diagnostics.length > 0
         ? { diagnostics: catalog.diagnostics }

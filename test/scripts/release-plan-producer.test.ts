@@ -14,12 +14,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { collectClawHubPublishablePluginPackages } from "../../scripts/lib/plugin-clawhub-release.ts";
 import { collectPublishablePluginPackages } from "../../scripts/lib/plugin-npm-release.ts";
-import { collectExtensionPackageJsonCandidates } from "../../scripts/lib/plugin-publication-candidates.ts";
 import {
   canonicalReleasePlanLockJson,
   createReleasePlanLock,
@@ -1023,14 +1022,14 @@ produceReleasePlan({
     "accepts pinned yaml package bytes (installer metadata=%s)",
     (installerMetadata) => {
       const { result, tempRoot, sentinelPath } = runYamlPackageSubprocess({
-        mutate: ({ packageRoot, sentinelPath }) => {
+        mutate: ({ packageRoot, sentinelPath: sentinel }) => {
           const installedDependencies = join(packageRoot, "node_modules");
           rmSync(installedDependencies, { recursive: true, force: true });
           if (installerMetadata) {
             mkdirSync(join(installedDependencies, ".bin"), { recursive: true });
             writeFileSync(
               join(installedDependencies, ".bin/yaml"),
-              `require("node:fs").writeFileSync(${JSON.stringify(sentinelPath)}, "executed");\n`,
+              `require("node:fs").writeFileSync(${JSON.stringify(sentinel)}, "executed");\n`,
             );
             symlinkSync("must-not-be-read", join(installedDependencies, "foreign-package"));
           }
@@ -1299,90 +1298,34 @@ mutateModule.syncBuiltinESMExports();
     );
   });
 
-  it("matches the exact current publisher inventory: 94 npm and 90 ClawHub packages", () => {
-    const root = tempDirs.make("openclaw-release-plan-current-");
+  it("fails closed for unsupported upstream orchestration at the fork source", () => {
+    const root = resolve(".");
     const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: resolve("."),
+      cwd: root,
       encoding: "utf8",
     }).trim();
-    execFileSync("git", ["clone", "-q", "--shared", "--no-checkout", resolve("."), root]);
-    const candidates = collectExtensionPackageJsonCandidates();
-    const pluginMetadataPaths = candidates.flatMap(({ packageDir, readmeText }) => [
-      `${packageDir}/package.json`,
-      ...(readmeText === undefined ? [] : [`${packageDir}/README.md`]),
-    ]);
-    // Preserve the exact candidate commit without materializing runtime trees for fixture cleanup.
-    execFileSync("git", ["sparse-checkout", "set", "--no-cone", "--stdin"], {
-      cwd: root,
-      input: [
-        ".github/workflows/",
-        "packages/*/package.json",
-        ...pluginMetadataPaths,
-        ...TOOLING_CLOSURE,
-        ...TOOLING_ROOT_FILES,
-      ]
-        .map((path) => `/${path}`)
-        .join("\n"),
-    });
-    execFileSync("git", ["checkout", "-q", "--detach", candidateSha], { cwd: root });
-    copyToolingClosure(root);
-    const toolingSha = commit(root, "tooling overlay", { allowEmpty: true });
-    execFileSync("git", ["update-ref", "refs/heads/main", toolingSha], { cwd: root });
-    expect(candidateSha).not.toBe(toolingSha);
-    expect(existsSync(join(root, "src"))).toBe(false);
-    expect(collectExtensionPackageJsonCandidates(root)).toEqual(candidates);
-    expect(
-      readdirSync(join(root, "extensions"), { recursive: true, withFileTypes: true })
-        .filter((entry) => entry.isFile())
-        .map((entry) => relative(root, join(entry.parentPath, entry.name)).replaceAll("\\", "/"))
-        .toSorted(),
-    ).toEqual(pluginMetadataPaths.toSorted());
+    // Read the actual committed source directly; no clone or lazy remote fetch.
+    expect(() =>
+      produceReleasePlan({
+        repoRoot: root,
+        intent: "main-qualification",
+        validationIntent: "main-weekly",
+        candidateSha,
+        candidateRef: candidateSha,
+        toolingSha: candidateSha,
+        toolingFullRef: "refs/heads/main",
+        runGh: () => JSON.stringify({ status: "identical" }),
+      }),
+    ).toThrow("openclaw-release-publish.yml");
+  });
 
-    const plan = produceReleasePlan({
-      repoRoot: root,
-      intent: "main-qualification",
-      validationIntent: "main-weekly",
-      candidateSha,
-      candidateRef: candidateSha,
-      toolingSha,
-      toolingFullRef: "refs/heads/main",
-      runGh: () => JSON.stringify({ status: "identical" }),
-    });
-    const npmPackages = plan.inventory.packages.filter((entry) => entry.targets.includes("npm"));
-    const clawHubPackages = plan.inventory.packages.filter((entry) =>
-      entry.targets.includes("clawhub"),
-    );
-    expect(npmPackages).toHaveLength(94);
-    expect(clawHubPackages).toHaveLength(90);
-    const coreNpmPackages = new Set([
-      "@openclaw/ai",
-      "@openclaw/gateway-client",
-      "@openclaw/gateway-protocol",
-      "openclaw",
-    ]);
-    expect(
-      npmPackages
-        .map((entry) => entry.name)
-        .filter((name) => !coreNpmPackages.has(name))
-        .toSorted(),
-    ).toEqual(
-      collectPublishablePluginPackages(root)
-        .map((plugin) => plugin.packageName)
-        .toSorted(),
-    );
-    expect(clawHubPackages.map((entry) => entry.name).toSorted()).toEqual(
-      collectClawHubPublishablePluginPackages(root)
-        .map((plugin) => plugin.packageName)
-        .toSorted(),
-    );
-    expect(npmPackages.map((entry) => entry.name)).toEqual(
-      expect.arrayContaining([
-        "@openclaw/ai",
-        "@openclaw/gateway-client",
-        "@openclaw/gateway-protocol",
-        "openclaw",
-      ]),
-    );
+  it("matches current package inventory without the retired publication orchestrator", () => {
+    const npm = collectPublishablePluginPackages();
+    const clawHub = collectClawHubPublishablePluginPackages();
+    expect(npm).toHaveLength(90);
+    expect(clawHub).toHaveLength(90);
+    expect(new Set(npm.map((entry) => entry.packageName)).size).toBe(90);
+    expect(new Set(clawHub.map((entry) => entry.packageName)).size).toBe(90);
   });
 
   it("rejects recomputed locks with partial groups or bogus inventory", () => {

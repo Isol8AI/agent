@@ -721,6 +721,53 @@ afterEach(async () => {
 });
 
 describe("session MCP runtime", () => {
+  it.each(["before-dispatch", "in-flight"])(
+    "revokes only the disposed shared view's request (%s)",
+    async (phase) => {
+      const dir = makeTempDir(tempDirs, "mcp-shared-revoke-");
+      const filePath = path.join(dir, "server.mjs");
+      const logPath = path.join(dir, "server.log");
+      const releasePath = path.join(dir, "release");
+      await writeListToolsMcpServer({ filePath, logPath, callToolReleasePath: releasePath });
+      const create = (id: string) =>
+        getOrCreateSessionMcpRuntime({
+          sessionId: id,
+          sessionKey: `agent:a:${id}`,
+          agentDir: path.join(dir, "agent"),
+          workspaceDir: dir,
+          cfg: {
+            mcp: {
+              runtimeScope: "shared",
+              servers: { probe: { command: process.execPath, args: [filePath] } },
+            },
+          },
+        });
+      const a = await create("a");
+      const b = await create("b");
+      try {
+        await Promise.all([a.getCatalog(), b.getCatalog()]);
+        const pending = a.callTool("probe", "slow_tool", {});
+        const rejected = expect(pending).rejects.toThrow(/disposed|Operation aborted/);
+        if (phase === "in-flight") {
+          await vi.waitFor(async () =>
+            expect(await fs.readFile(logPath, "utf8")).toContain("recv tools/call"),
+          );
+        }
+        await a.dispose();
+        await rejected;
+        const calls = (await fs.readFile(logPath, "utf8")).split("recv tools/call").length - 1;
+        expect(calls).toBe(phase === "in-flight" ? 1 : 0);
+        await fs.writeFile(releasePath, "release");
+        await expect(b.callTool("probe", "slow_tool", {})).resolves.toMatchObject({
+          isError: false,
+        });
+        expect((await fs.readFile(logPath, "utf8")).split("recv initialize").length - 1).toBe(1);
+      } finally {
+        await Promise.all([a.dispose(), b.dispose()]);
+      }
+    },
+  );
+
   it("materializes cold catalogs without waiting and releases the warming lease", async () => {
     const runtime = makeRuntime([{ toolName: "probe", description: "probe" }]);
     const catalog = await runtime.getCatalog();

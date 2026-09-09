@@ -9,7 +9,7 @@ beforeAll(async () => {
 });
 afterEach(resetSecretRedactionRegistryForTest);
 describe("owned shell header source", () => {
-  it.each(["$TOKEN", "\${TOKEN}", "\${TOKEN:-}", "$(printenv TOKEN)"])(
+  it.each(["$TOKEN", "${TOKEN}", "${TOKEN:-}", "$(printenv TOKEN)"])(
     "preserves whole expanding %s",
     (value) => {
       for (const header of [
@@ -28,7 +28,7 @@ describe("owned shell header source", () => {
     },
   );
   it.each([
-    "\${TOKEN:-literal}",
+    "${TOKEN:-literal}",
     "$(cat /tmp/token)",
     "$(printenv TOKEN EXTRA)",
     "$TOKEN-suffix",

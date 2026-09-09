@@ -23,7 +23,10 @@ import {
   getSessionMcpRuntimeManagerForTesting,
 } from "./agent-bundle-mcp-manager-api.js";
 import { assignSafeServerNames } from "./agent-bundle-mcp-names.js";
-import { getSessionMcpRequestSignal } from "./agent-bundle-mcp-request-context.js";
+import {
+  getSessionMcpRequestSignal,
+  runWithSessionMcpRequestSignal,
+} from "./agent-bundle-mcp-request-context.js";
 import { loadSessionMcpConfig } from "./agent-bundle-mcp-runtime-config.js";
 import { sessionMcpRuntimeOwners } from "./agent-bundle-mcp-runtime-owner.js";
 import type { CreateSessionMcpRuntime } from "./agent-bundle-mcp-runtime-shared.js";
@@ -274,6 +277,38 @@ function acquireServerRuntime(
   let retiredCatalog: McpToolCatalog | undefined;
   let cleanup: Promise<void> | undefined;
   let leases = 0;
+  const lifetime = new AbortController();
+  const guardRequest =
+    <Args extends unknown[], Result>(request: (...args: Args) => Promise<Result>) =>
+    async (...args: Args): Promise<Result> => {
+      const caller = getSessionMcpRequestSignal();
+      const signal = caller ? AbortSignal.any([caller, lifetime.signal]) : lifetime.signal;
+      signal.throwIfAborted();
+      return runWithSessionMcpRequestSignal(signal, async () => {
+        const result = await racePromiseWithAbortSignal(request(...args), signal);
+        signal.throwIfAborted();
+        return result;
+      });
+    };
+  view.callTool = guardRequest(view.callTool);
+  if (view.listTools) {
+    view.listTools = guardRequest(view.listTools);
+  }
+  if (view.listResources) {
+    view.listResources = guardRequest(view.listResources);
+  }
+  if (view.readResource) {
+    view.readResource = guardRequest(view.readResource);
+  }
+  if (view.listResourceTemplates) {
+    view.listResourceTemplates = guardRequest(view.listResourceTemplates);
+  }
+  if (view.listPrompts) {
+    view.listPrompts = guardRequest(view.listPrompts);
+  }
+  if (view.getPrompt) {
+    view.getPrompt = guardRequest(view.getPrompt);
+  }
   Object.defineProperty(view, "activeLeases", { get: () => leases });
   Object.defineProperty(view, "retiredCatalog", { get: () => retiredCatalog });
   view.acquireLease = () => {
@@ -301,6 +336,7 @@ function acquireServerRuntime(
   view.dispose = async () => {
     if (!disposed) {
       disposed = true;
+      lifetime.abort(createDisposedError(params.sessionId));
       retiredCatalog = {
         version: 1,
         generatedAt: Date.now(),

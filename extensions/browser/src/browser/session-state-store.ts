@@ -7,17 +7,20 @@
  * class of state must never live on EFS/NFS (the O6 `database is locked`
  * hazard). Persist state, not the profile dir — mirrors Browserbase Contexts.
  *
- * The snapshot is driven entirely through a browser-level CDP send function
- * (the abstraction `withCdpSocket` hands callers), so it needs no Playwright
- * page handle and is trivially testable with a mock send.
+ * Snapshots use browser-level CDP. Restore creates temporary pages through
+ * the native guarded navigation path before applying origin-bound storage.
  */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { CdpSendFn } from "./cdp.helpers.js";
+import { DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME } from "./constants.js";
+import { assertBrowserNavigationAllowed } from "./navigation-guard.js";
+import type { createPageViaPlaywright } from "./pw-session-actions.js";
 
-export const SESSION_STATE_VERSION = 1;
+const SESSION_STATE_VERSION = 1;
 
 /** How long to wait for a throwaway restore tab to commit on its origin. */
 const ORIGIN_COMMIT_ATTEMPTS = 8;
@@ -38,6 +41,15 @@ export type ResolvedSessionStateConfig = {
   intervalMs: number;
   path: string;
 };
+
+/** Preserve the legacy file for the canonical openclaw profile only. */
+export function resolveProfileSessionStatePath(snapshotPath: string, profileName: string): string {
+  return profileName === DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME
+    ? snapshotPath
+    : `${snapshotPath}.profile-${encodeURIComponent(profileName)}.json`;
+}
+
+type RestoreNavigation = Omit<Parameters<typeof createPageViaPlaywright>[0], "url">;
 
 /** Expand a leading `~`/`~/` against the process home dir. */
 function expandHome(input: string): string {
@@ -99,11 +111,11 @@ function persistableOrigin(url: unknown): string | null {
 
 /** Keep only string→string entries; CDP returnByValue can carry non-strings. */
 function coerceStringMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object") {
+  if (!isRecord(value)) {
     return {};
   }
   const out: Record<string, string> = Object.create(null);
-  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, val] of Object.entries(value)) {
     if (typeof val === "string") {
       out[key] = val;
     }
@@ -118,34 +130,39 @@ async function atomicWriteJson(outPath: string, payload: unknown): Promise<void>
 
 /** Read all cookies across browser contexts. */
 async function readAllCookies(send: CdpSendFn): Promise<SessionCookie[]> {
-  const res = (await send("Storage.getCookies")) as { cookies?: unknown } | null;
-  const cookies = res?.cookies;
-  return Array.isArray(cookies) ? (cookies as SessionCookie[]) : [];
+  const res = await send("Storage.getCookies");
+  const cookies = isRecord(res) ? res.cookies : undefined;
+  return Array.isArray(cookies) ? cookies.filter(isRecord) : [];
 }
 
 /** Read one page target's localStorage as a string map (attach → evaluate → detach). */
 async function readOriginLocalStorage(
   send: CdpSendFn,
   targetId: string,
-): Promise<Record<string, string>> {
-  const attached = (await send("Target.attachToTarget", {
+  origin: string,
+): Promise<OriginState | null> {
+  const attached = await send("Target.attachToTarget", {
     targetId,
     flatten: true,
-  })) as { sessionId?: unknown } | null;
-  const sessionId = typeof attached?.sessionId === "string" ? attached.sessionId : undefined;
+  });
+  const sessionId =
+    isRecord(attached) && typeof attached.sessionId === "string" ? attached.sessionId : undefined;
   if (!sessionId) {
-    return {};
+    return null;
   }
   try {
-    const res = (await send(
+    const res = await send(
       "Runtime.evaluate",
       {
-        expression: "Object.fromEntries(Object.entries(localStorage))",
+        expression: `(() => { const origin = location.origin; return origin === ${JSON.stringify(origin)} ? { origin, localStorage: Object.fromEntries(Object.entries(localStorage)) } : null; })()`,
         returnByValue: true,
       },
       sessionId,
-    )) as { result?: { value?: unknown } } | null;
-    return coerceStringMap(res?.result?.value);
+    );
+    const value = isRecord(res) && isRecord(res.result) ? res.result.value : undefined;
+    return isRecord(value) && value.origin === origin && isRecord(value.localStorage)
+      ? { origin, localStorage: coerceStringMap(value.localStorage) }
+      : null;
   } finally {
     await send("Target.detachFromTarget", { sessionId }).catch(() => {});
   }
@@ -153,10 +170,9 @@ async function readOriginLocalStorage(
 
 /** Collect per-origin localStorage from all open http/https page targets (deduped by origin). */
 async function readAllOrigins(send: CdpSendFn): Promise<OriginState[]> {
-  const res = (await send("Target.getTargets")) as { targetInfos?: unknown } | null;
-  const infos = Array.isArray(res?.targetInfos)
-    ? (res.targetInfos as Array<Record<string, unknown>>)
-    : [];
+  const res = await send("Target.getTargets");
+  const infos =
+    isRecord(res) && Array.isArray(res.targetInfos) ? res.targetInfos.filter(isRecord) : [];
   const seen = new Set<string>();
   const out: OriginState[] = [];
   for (const info of infos) {
@@ -167,13 +183,15 @@ async function readAllOrigins(send: CdpSendFn): Promise<OriginState[]> {
     if (!origin || seen.has(origin)) {
       continue;
     }
-    seen.add(origin);
     const targetId = typeof info?.targetId === "string" ? info.targetId : undefined;
     if (!targetId) {
       continue;
     }
-    const localStorage = await readOriginLocalStorage(send, targetId).catch(() => ({}));
-    out.push({ origin, localStorage });
+    const observed = await readOriginLocalStorage(send, targetId, origin).catch(() => null);
+    if (observed) {
+      seen.add(origin);
+      out.push(observed);
+    }
   }
   return out;
 }
@@ -187,7 +205,16 @@ export async function snapshotSessionState(
   outPath: string,
 ): Promise<{ cookies: number; origins: number }> {
   const cookies = await readAllCookies(send);
-  const origins = await readAllOrigins(send);
+  const previous = await readSessionState(outPath);
+  const originsByName = new Map(
+    (previous?.origins ?? [])
+      .filter((entry) => persistableOrigin(entry.origin) === entry.origin)
+      .map((entry) => [entry.origin, entry]),
+  );
+  for (const entry of await readAllOrigins(send)) {
+    originsByName.set(entry.origin, entry);
+  }
+  const origins = [...originsByName.values()];
   const payload: SessionStateFile = {
     version: SESSION_STATE_VERSION,
     savedAt: new Date().toISOString(),
@@ -206,10 +233,10 @@ function delay(ms: number): Promise<void> {
 
 /** Drop fields Network.CookieParam rejects; require name+value. */
 function toCookieParam(cookie: unknown): SessionCookie | null {
-  if (!cookie || typeof cookie !== "object") {
+  if (!isRecord(cookie)) {
     return null;
   }
-  const copy = { ...(cookie as Record<string, unknown>) };
+  const copy = { ...cookie };
   if (typeof copy.name !== "string" || typeof copy.value !== "string") {
     return null;
   }
@@ -260,12 +287,12 @@ async function waitForTargetOrigin(
   origin: string,
 ): Promise<boolean> {
   for (let attempt = 0; attempt < ORIGIN_COMMIT_ATTEMPTS; attempt += 1) {
-    const res = (await send(
+    const res = await send(
       "Runtime.evaluate",
       { expression: "location.origin", returnByValue: true },
       sessionId,
-    ).catch(() => null)) as { result?: { value?: unknown } } | null;
-    if (res?.result?.value === origin) {
+    ).catch(() => null);
+    if (isRecord(res) && isRecord(res.result) && res.result.value === origin) {
       return true;
     }
     if (attempt < ORIGIN_COMMIT_ATTEMPTS - 1) {
@@ -280,30 +307,37 @@ async function waitForTargetOrigin(
  * replaying the items. Per-item failure is tolerated inside the page. Returns
  * true when the items were written.
  */
-async function restoreOriginLocalStorage(send: CdpSendFn, entry: unknown): Promise<boolean> {
-  const origin =
-    entry && typeof entry === "object" && typeof (entry as OriginState).origin === "string"
-      ? (entry as OriginState).origin
-      : "";
-  const items = coerceStringMap((entry as OriginState | undefined)?.localStorage);
+async function restoreOriginLocalStorage(
+  send: CdpSendFn,
+  entry: unknown,
+  navigation?: RestoreNavigation,
+): Promise<boolean> {
+  if (!isRecord(entry)) {
+    return false;
+  }
+  const origin = typeof entry.origin === "string" ? entry.origin : "";
+  const items = coerceStringMap(entry.localStorage);
   const pairs = Object.entries(items);
-  if (!origin || persistableOrigin(origin) !== origin || pairs.length === 0) {
+  if (!origin || persistableOrigin(origin) !== origin || pairs.length === 0 || !navigation) {
     return false;
   }
 
-  const created = (await send("Target.createTarget", { url: origin }).catch(() => null)) as {
-    targetId?: unknown;
-  } | null;
+  // CDP control-socket pinning does not authorize page traffic. Native Playwright
+  // navigation guards the initial URL, document requests and redirect chain.
+  await assertBrowserNavigationAllowed({ ...navigation, url: origin });
+  const { createPageViaPlaywright } = await import("./pw-session-actions.js");
+  const created = await createPageViaPlaywright({ ...navigation, url: origin });
   const targetId = typeof created?.targetId === "string" ? created.targetId : undefined;
   if (!targetId) {
     return false;
   }
   try {
-    const attached = (await send("Target.attachToTarget", {
+    const attached = await send("Target.attachToTarget", {
       targetId,
       flatten: true,
-    }).catch(() => null)) as { sessionId?: unknown } | null;
-    const sessionId = typeof attached?.sessionId === "string" ? attached.sessionId : undefined;
+    }).catch(() => null);
+    const sessionId =
+      isRecord(attached) && typeof attached.sessionId === "string" ? attached.sessionId : undefined;
     if (!sessionId) {
       return false;
     }
@@ -313,15 +347,15 @@ async function restoreOriginLocalStorage(send: CdpSendFn, entry: unknown): Promi
     // Replay every item in the page with a per-item try/catch so a single
     // rejected key (e.g. a quota error) never aborts the rest.
     const expr =
-      `(function(items){var n=0;for(var i=0;i<items.length;i++){` +
+      `(function(items){if(location.origin!==${JSON.stringify(origin)})return null;var n=0;for(var i=0;i<items.length;i++){` +
       `try{localStorage.setItem(items[i][0],items[i][1]);n++;}catch(e){}}return n;})` +
       `(${JSON.stringify(pairs)})`;
-    const res = (await send(
+    const res = await send(
       "Runtime.evaluate",
       { expression: expr, returnByValue: true },
       sessionId,
-    ).catch(() => null)) as { result?: { value?: unknown } } | null;
-    return typeof res?.result?.value === "number";
+    ).catch(() => null);
+    return isRecord(res) && isRecord(res.result) && typeof res.result.value === "number";
   } finally {
     await send("Target.closeTarget", { targetId }).catch(() => {});
   }
@@ -336,7 +370,27 @@ async function restoreOriginLocalStorage(send: CdpSendFn, entry: unknown): Promi
 export async function restoreSessionState(
   send: CdpSendFn,
   inPath: string,
+  navigation?: RestoreNavigation,
 ): Promise<{ cookies: number; origins: number } | null> {
+  const file = await readSessionState(inPath);
+  if (!file) {
+    return null;
+  }
+  const cookieCount = await restoreCookies(send, file.cookies);
+  let originCount = 0;
+  for (const entry of file.origins) {
+    try {
+      if (await restoreOriginLocalStorage(send, entry, navigation)) {
+        originCount += 1;
+      }
+    } catch {
+      // Policy denials and unavailable origins remain persisted for a later retry.
+    }
+  }
+  return { cookies: cookieCount, origins: originCount };
+}
+
+async function readSessionState(inPath: string): Promise<SessionStateFile | null> {
   let raw: string;
   try {
     raw = await fs.readFile(inPath, "utf8");
@@ -349,27 +403,26 @@ export async function restoreSessionState(
   } catch {
     return null;
   }
-  if (!parsed || typeof parsed !== "object") {
+  if (!isRecord(parsed)) {
     return null;
   }
-  const file = parsed as Partial<SessionStateFile>;
+  const file = parsed;
   if (file.version !== SESSION_STATE_VERSION) {
     return null;
   }
 
-  const cookies = Array.isArray(file.cookies) ? file.cookies : [];
-  const origins = Array.isArray(file.origins) ? file.origins : [];
-
-  const cookieCount = await restoreCookies(send, cookies);
-  let originCount = 0;
-  for (const entry of origins) {
-    try {
-      if (await restoreOriginLocalStorage(send, entry)) {
-        originCount += 1;
-      }
-    } catch {
-      // Best-effort: skip an origin that fails unexpectedly.
-    }
-  }
-  return { cookies: cookieCount, origins: originCount };
+  return {
+    version: SESSION_STATE_VERSION,
+    savedAt: typeof file.savedAt === "string" ? file.savedAt : "",
+    cookies: Array.isArray(file.cookies) ? file.cookies.filter(isRecord) : [],
+    origins: Array.isArray(file.origins)
+      ? file.origins
+          .filter(isRecord)
+          .flatMap((entry) =>
+            typeof entry.origin === "string"
+              ? [{ origin: entry.origin, localStorage: coerceStringMap(entry.localStorage) }]
+              : [],
+          )
+      : [],
+  };
 }

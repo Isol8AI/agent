@@ -62,7 +62,7 @@ export async function prepareShellSourceRedactor(): Promise<
                 isHeaderArgument &&
                 arg.type === "string" &&
                 reference.test(value) &&
-                !!leaf &&
+                leaf !== undefined &&
                 ["simple_expansion", "expansion", "command_substitution"].includes(leaf.type) &&
                 (leaf.type !== "command_substitution" ||
                   (leaf.namedChildren.length === 1 &&
@@ -92,11 +92,12 @@ export async function prepareShellSourceRedactor(): Promise<
             (header, _, all) =>
               !all.some((outer) => outer.start < header.start && outer.end >= header.end),
           )
-          .sort((a, b) => b.start - a.start);
+          .toSorted((a, b) => b.start - a.start);
+        let masked = text;
         for (const span of spans) {
-          text = text.slice(0, span.start) + "***" + text.slice(span.end);
+          masked = masked.slice(0, span.start) + "***" + masked.slice(span.end);
         }
-        return text;
+        return masked;
       },
       preserves(text, offset, length) {
         return inspect(text).some(

@@ -682,6 +682,7 @@ export type RunningChrome = {
   userDataDir: string;
   cdpPort: number;
   startedAt: number;
+  profileName?: string;
   proc: ChildProcess;
   headless?: boolean;
   headlessSource?: ManagedBrowserHeadlessSource;
@@ -1064,6 +1065,7 @@ export async function launchOpenClawChrome(
 
   const startedAt = Date.now();
   const runningForProcess = (proc: ChildProcess, pid: number): RunningChrome => ({
+    profileName: profile.name,
     pid,
     exe,
     userDataDir,
@@ -1381,7 +1383,7 @@ export async function isChromeCdpOwnedByPid(
 }
 
 async function requestGracefulChromeClose(
-  running: Pick<RunningChrome, "pid" | "cdpPort">,
+  running: Pick<RunningChrome, "pid" | "cdpPort" | "profileName">,
   timeoutMs: number,
   ssrfPolicy?: SsrFPolicy,
   ownsCurrentProcess?: () => boolean,
@@ -1413,7 +1415,7 @@ async function requestGracefulChromeClose(
           return;
         }
         const { snapshotSessionStateViaSend } = await import("./session-state-launch.js");
-        await snapshotSessionStateViaSend(send);
+        await snapshotSessionStateViaSend(send, running.profileName);
         if (ownsCurrentProcess && !ownsCurrentProcess()) {
           return;
         }
@@ -1469,7 +1471,7 @@ export async function stopOwnedOpenClawChrome(
   // Browser runtimes do not share child handles; revalidate the exact process
   // before either CDP close or signal-based cleanup can affect a replacement.
   const gracefulCloseRequested = await requestGracefulChromeClose(
-    { pid, cdpPort: profile.cdpPort },
+    { pid, cdpPort: profile.cdpPort, profileName: profile.name },
     timeoutMs,
     resolved.ssrfPolicy,
     () => {

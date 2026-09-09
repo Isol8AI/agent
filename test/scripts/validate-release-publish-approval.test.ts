@@ -263,18 +263,32 @@ if (JSON.stringify(args) === JSON.stringify(["rev-parse", "v2026.8.1^{commit}"])
 `,
     { mode: 0o755 },
   );
-  const producer = spawnSync(
-    "bash",
-    [
-      "-c",
-      workflowStep(
-        ".github/workflows/openclaw-release-publish.yml",
-        "Write Android release approval",
-      ),
-    ],
-    { cwd: tempRoot, encoding: "utf8", env },
+  // Historical approval input for the retained consumer; the upstream producer is retired.
+  fs.mkdirSync(path.dirname(approvalPath), { recursive: true });
+  fs.writeFileSync(
+    approvalPath,
+    JSON.stringify({
+      version: nativeCi ? 3 : 2,
+      repository: "openclaw/openclaw",
+      workflow: "OpenClaw Release Publish",
+      parentRunId: "123",
+      parentRunAttempt: 2,
+      workflowBranch: ref,
+      workflowFullRef: fullRef,
+      parentWorkflowSha: ANDROID_TOOLING_SHA,
+      releaseTag: "v2026.8.1",
+      targetSha: "a".repeat(40),
+      ...(nativeCi
+        ? { nativeCi: { runId: "91", runAttempt: 1, workflowRef: ANDROID_PROTECTED_REF } }
+        : {}),
+    }),
   );
-  expect(producer.status, producer.stderr).toBe(0);
+  const nativeQualification = spawnSync(
+    process.execPath,
+    ["scripts/android-native-ci.mjs", approvalPath],
+    { encoding: "utf8", env },
+  );
+  expect(nativeQualification.status, nativeQualification.stderr).toBe(0);
   const dispatch = spawnSync(
     "bash",
     [
@@ -332,8 +346,8 @@ promote_android_release_asset
     }),
   );
   fs.writeFileSync(nativeCiPath, JSON.stringify({ ...nativeRun, ...nativeCi }));
-  // Execute the real producer and consumer handoff, stopping before release
-  // mutation/build checks. Only GitHub's external boundary is substituted.
+  // Execute the retained consumer against historical approval input, stopping
+  // before release mutation/build checks. GitHub's external boundary is substituted.
   const admission = workflowStep(
     ".github/workflows/android-release.yml",
     "Validate release approval and target",

@@ -6,9 +6,10 @@ import { getRuntimeConfig } from "../config/config.js";
  * persistence never blocks a browser launch, snapshot tick, or shutdown.
  */
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { resolveBrowserNavigationProxyMode } from "./browser-proxy-mode.js";
 import { resolveCdpReachabilityPolicy } from "./cdp-reachability-policy.js";
 import type { CdpSendFn } from "./cdp.helpers.js";
-import { withCdpSocket } from "./cdp.helpers.js";
+import { scopeCdpPolicyToConfiguredEndpoint, withCdpSocket } from "./cdp.helpers.js";
 import { getChromeWebSocketEndpoint } from "./chrome.js";
 import type { ResolvedBrowserConfig, ResolvedBrowserProfile } from "./config.js";
 import { getBrowserProfileCapabilities } from "./profile-capabilities.js";
@@ -17,6 +18,7 @@ import type { BrowserServerState } from "./server-context.types.js";
 import {
   type ResolvedSessionStateConfig,
   resolveSessionStateConfig,
+  resolveProfileSessionStatePath,
   restoreSessionState,
   snapshotSessionState,
 } from "./session-state-store.js";
@@ -75,13 +77,22 @@ export async function restoreManagedBrowserSessionState(
   if (!config.enabled) {
     return;
   }
+  const snapshotPath = resolveProfileSessionStatePath(config.path, params.profile.name);
   try {
     const result = await withBrowserCdpSend(params.profile, params.resolved, (send) =>
-      restoreSessionState(send, config.path),
+      restoreSessionState(send, snapshotPath, {
+        cdpUrl: params.profile.cdpUrl,
+        cdpPolicy: scopeCdpPolicyToConfiguredEndpoint(
+          params.profile.cdpUrl,
+          params.resolved.ssrfPolicy,
+        ),
+        ssrfPolicy: params.resolved.ssrfPolicy,
+        browserProxyMode: resolveBrowserNavigationProxyMode(params),
+      }),
     );
     if (result) {
       log.debug(
-        `restored session state: ${result.cookies} cookies, ${result.origins} origins from ${config.path}`,
+        `restored session state: ${result.cookies} cookies, ${result.origins} origins from ${snapshotPath}`,
       );
     }
   } catch (err) {
@@ -93,20 +104,21 @@ export async function restoreManagedBrowserSessionState(
  * Snapshot a running managed browser's session state. Never throws — a failed
  * snapshot must not disrupt the timer tick or the shutdown path.
  */
-export async function snapshotManagedBrowserSessionState(
+async function snapshotManagedBrowserSessionState(
   params: ManagedSessionStateParams,
 ): Promise<void> {
   const config = readSessionStateConfig();
   if (!config.enabled) {
     return;
   }
+  const snapshotPath = resolveProfileSessionStatePath(config.path, params.profile.name);
   try {
     const result = await withBrowserCdpSend(params.profile, params.resolved, (send) =>
-      snapshotSessionState(send, config.path),
+      snapshotSessionState(send, snapshotPath),
     );
     if (result) {
       log.debug(
-        `snapshotted session state: ${result.cookies} cookies, ${result.origins} origins to ${config.path}`,
+        `snapshotted session state: ${result.cookies} cookies, ${result.origins} origins to ${snapshotPath}`,
       );
     }
   } catch (err) {
@@ -119,13 +131,16 @@ export async function snapshotManagedBrowserSessionState(
  * graceful-shutdown path where the close handler already holds the socket, so
  * there is no need to re-resolve one. Never throws.
  */
-export async function snapshotSessionStateViaSend(send: CdpSendFn): Promise<void> {
+export async function snapshotSessionStateViaSend(
+  send: CdpSendFn,
+  profileName?: string,
+): Promise<void> {
   const config = readSessionStateConfig();
-  if (!config.enabled) {
+  if (!config.enabled || !profileName) {
     return;
   }
   try {
-    await snapshotSessionState(send, config.path);
+    await snapshotSessionState(send, resolveProfileSessionStatePath(config.path, profileName));
   } catch (err) {
     log.warn(`session-state shutdown snapshot failed (continuing): ${String(err)}`);
   }

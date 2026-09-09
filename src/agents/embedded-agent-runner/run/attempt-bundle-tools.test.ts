@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../../test/helpers/promise.js";
 import {
   createPluginMetadataSnapshot,
   makeRegistry,
 } from "../../../config/plugin-auto-enable.test-helpers.js";
+import { createDiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import { setPluginToolMeta } from "../../../plugins/tool-metadata.js";
+import { materializeBundleMcpToolsForRun } from "../../agent-bundle-mcp-materialize.js";
+import type { McpToolCatalog, SessionMcpRuntime } from "../../agent-bundle-mcp-types.js";
+import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
 import { createAgentCleanupScope } from "../../run-cleanup-timeout.js";
 import { createStubTool } from "../../test-helpers/agent-tool-stubs.js";
 import { attachToolAllowlistIntersection } from "../../tool-policy.js";
+import {
+  createToolSearchCatalogRef,
+  createToolSearchTools,
+  resolveToolSearchConfig,
+  clearToolSearchCatalog,
+} from "../../tool-search.js";
 
 const mocks = vi.hoisted(() => ({
   createBundleLspToolRuntime: vi.fn(),
@@ -25,7 +36,8 @@ vi.mock("../../agent-bundle-mcp-tools.js", () => ({
   materializeBundleMcpToolsForRun: mocks.materializeBundleMcpToolsForRun,
 }));
 
-vi.mock("../../runtime-plan/tools.js", () => ({
+vi.mock("../../runtime-plan/tools.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../runtime-plan/tools.js")>()),
   normalizeAgentRuntimeTools: vi.fn(({ tools }: { tools: unknown[] }) => [...tools]),
 }));
 
@@ -43,6 +55,7 @@ vi.mock("../effective-tool-policy.js", () => ({
 
 import { prepareEmbeddedAttemptBundleTools } from "./attempt-bundle-tools.js";
 import { createAttemptSetupFixture } from "./attempt-setup.test-support.js";
+import { prepareEmbeddedAttemptToolCatalog } from "./attempt-tool-catalog.js";
 
 describe("prepareEmbeddedAttemptBundleTools", () => {
   beforeEach(() => {
@@ -83,6 +96,94 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
       },
     } as unknown as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0];
   }
+
+  it("makes MCP callable through the original cold run's deferred directory", async () => {
+    const config = {
+      plugins: { enabled: false },
+      mcp: { servers: { probe: { command: "fixture" } } },
+      tools: { toolSearch: { enabled: true, mode: "directory" as const } },
+    };
+    const catalogRef = createToolSearchCatalogRef();
+    const controls = createToolSearchTools({ config, catalogRef });
+    const input = createInput([], controls);
+    input.attempt.config = config;
+    input.attempt.runtimePlan = undefined;
+    Object.assign(input.preparedToolBase, {
+      codeModeControlsEnabledForRun: false,
+      toolSearchControlsEnabledForRun: true,
+      toolSearchConfig: resolveToolSearchConfig(config),
+      toolSearchRuntimeConfig: config,
+      toolSearchCatalogRef: catalogRef,
+      runtimeCapabilityProfile: resolveConversationCapabilityProfile({ config }),
+    });
+    const deferred = createDeferred<McpToolCatalog>();
+    const callTool = vi.fn(async () => ({
+      content: [{ type: "text" as const, text: "same-cold-run" }],
+    }));
+    const runtime: SessionMcpRuntime = {
+      sessionId: "session",
+      workspaceDir: "/tmp/workspace",
+      configFingerprint: "cold",
+      createdAt: 0,
+      lastUsedAt: 0,
+      markUsed() {},
+      peekCatalog: () => null,
+      getCatalog: () => deferred.promise,
+      callTool,
+      dispose: async () => {},
+      joinCleanup: async () => {},
+      acquireLease: () => () => {},
+    };
+    mocks.acquireSessionMcpRuntime.mockResolvedValue({ runtime });
+    mocks.materializeBundleMcpToolsForRun.mockImplementation(materializeBundleMcpToolsForRun);
+    const bundleTools = await prepareEmbeddedAttemptBundleTools(input);
+    expect(bundleTools.bundleMcpRuntime?.tools).toEqual([]);
+    const prepared = prepareEmbeddedAttemptToolCatalog({
+      attempt: input.attempt,
+      setup: input.setup,
+      preparedToolBase: input.preparedToolBase,
+      bundleTools,
+      abortSignal: new AbortController().signal,
+      runTrace: createDiagnosticTraceContext(),
+      executeCodeModeTool: async () => {
+        throw new Error("not Code Mode");
+      },
+    });
+    try {
+      const search = prepared.effectiveTools.find((tool) => tool.name === "tool_search")!;
+      const searching = search.execute("cold-search", { query: "probe" });
+      expect(callTool).not.toHaveBeenCalled();
+      deferred.resolve({
+        version: 1,
+        generatedAt: 1,
+        servers: { probe: { serverName: "probe", launchSummary: "probe", toolCount: 1 } },
+        tools: [
+          {
+            serverName: "probe",
+            safeServerName: "probe",
+            toolName: "query",
+            description: "probe",
+            inputSchema: { type: "object", properties: {} },
+            fallbackDescription: "probe",
+          },
+        ],
+      });
+      const result = await searching;
+      expect(JSON.stringify(result)).toContain("probe");
+      expect(
+        bundleTools.uncompactedEffectiveTools.some((tool) => tool.name === "probe__query"),
+      ).toBe(true);
+      const call = prepared.effectiveTools.find((tool) => tool.name === "tool_call")!;
+      expect(
+        JSON.stringify(await call.execute("cold-call", { id: "probe__query", args: {} })),
+      ).toContain("same-cold-run");
+      expect(callTool).toHaveBeenCalledWith("probe", "query", {});
+      expect(mocks.materializeBundleMcpToolsForRun).toHaveBeenCalledTimes(1);
+    } finally {
+      await bundleTools.bundleMcpRuntime?.dispose();
+      clearToolSearchCatalog({ catalogRef });
+    }
+  });
 
   it.each([
     { allow: ["chrome*"], expected: ["chrome__click"] },

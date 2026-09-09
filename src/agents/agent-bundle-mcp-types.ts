@@ -22,6 +22,8 @@ export type SessionMcpConfigReload = {
 /** Materialized MCP tools plus diagnostics and cleanup handle for one run. */
 export type BundleMcpToolRuntime = {
   tools: AnyAgentTool[];
+  /** Cold discovery updates this run's arrays before deferred directory dispatch. */
+  ready?: Promise<void>;
   /** All MCP tool-call projections, including App-only tools, for policy evaluation. */
   appTools?: AnyAgentTool[];
   diagnostics?: readonly McpToolCatalogDiagnostic[];

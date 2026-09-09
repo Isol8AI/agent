@@ -9,6 +9,7 @@ import { resolveStateDir } from "../config/paths.js";
 import { logWarn } from "../logger.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
+import { hasErrnoCode } from "./errno.js";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -475,7 +476,7 @@ export async function importLegacyMcpOAuthStoreFile(
       },
     );
   } catch (error) {
-    if (!["ENOENT", "not-found"].includes((error as { code?: string }).code ?? "")) {
+    if (!hasErrnoCode(error, "ENOENT") && !hasErrnoCode(error, "not-found")) {
       logWarn("mcp-oauth: seeded store import failed; source retained for retry");
     }
   }

@@ -100,7 +100,7 @@ describe("session resolution metadata", () => {
   });
 
   it.each(["malformed", "nul", "mismatched-time", "mismatched-window"])(
-    "preserves warm and cold lookup outcomes for %s rows",
+    "reports unavailable corruption rather than missing data for %s rows",
     async (kind) => {
       await withOpenClawTestState({ label: "resolve-corruption" }, async () => {
         const siblingKey = "agent:main:sibling";
@@ -127,23 +127,28 @@ describe("session resolution metadata", () => {
             .prepare("UPDATE session_nodes SET current_session_id = ? WHERE session_key = ?")
             .run("different", scope.sessionKey);
         }
-        expect(await resolve({ key: scope.sessionKey, allowMissing: true })).toEqual(
-          kind === "mismatched-window" ? resolved : { ok: true, missing: true },
-        );
+        if (kind === "mismatched-window") {
+          expect(await resolve({ key: scope.sessionKey, allowMissing: true })).toEqual(resolved);
+        } else {
+          // The already-open metadata projection filters invalid rows; a fresh
+          // open below revalidates the schema and rejects the corrupt store.
+          expect(await resolve({ key: scope.sessionKey, allowMissing: true })).toEqual({
+            ok: true,
+            missing: true,
+          });
+        }
         expect(await resolve({ key: siblingKey })).toEqual({
           ok: true,
           key: siblingKey,
           agentId: "main",
         });
         closeOpenClawAgentDatabasesForTest();
-        expect(await resolve({ key: scope.sessionKey, allowMissing: true })).toEqual({
-          ok: true,
-          missing: true,
-        });
-        expect(await resolve({ key: siblingKey, allowMissing: true })).toEqual({
-          ok: true,
-          missing: true,
-        });
+        await expect(resolve({ key: scope.sessionKey, allowMissing: true })).rejects.toThrow(
+          "Session store is unavailable",
+        );
+        await expect(resolve({ key: siblingKey, allowMissing: true })).rejects.toThrow(
+          "Session store is unavailable",
+        );
       });
     },
   );

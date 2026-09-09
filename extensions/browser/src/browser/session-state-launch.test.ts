@@ -18,6 +18,7 @@ import {
   snapshotSessionStateViaSend,
   startBrowserSessionStateSnapshotTimer,
 } from "./session-state-launch.js";
+import { resolveProfileSessionStatePath } from "./session-state-store.js";
 
 const enabledConfig = () => ({ enabled: true, intervalMs: 60_000, path: "/unused" });
 
@@ -120,6 +121,29 @@ describe("snapshotSessionStateViaSend", () => {
     await fs.rm(tmpDir, { recursive: true, force: true });
   });
 
+  it("uses the exact handle's profile and refuses an unknown shutdown owner", async () => {
+    const outPath = path.join(tmpDir, "state.json");
+    vi.mocked(getRuntimeConfig).mockReturnValue({
+      browser: { sessionState: { enabled: true, path: outPath } },
+    });
+    const unknown = vi.fn(async () => ({}));
+    await snapshotSessionStateViaSend(unknown);
+    expect(unknown).not.toHaveBeenCalled();
+    for (const profile of ["openclaw", "work"]) {
+      const send: CdpSendFn = async (method) =>
+        method === "Storage.getCookies"
+          ? { cookies: [{ name: "sid", value: profile }] }
+          : { targetInfos: [] };
+      await snapshotSessionStateViaSend(send, profile);
+    }
+    for (const profile of ["openclaw", "work"]) {
+      const written = JSON.parse(
+        await fs.readFile(resolveProfileSessionStatePath(outPath, profile), "utf8"),
+      );
+      expect(written.cookies).toEqual([{ name: "sid", value: profile }]);
+    }
+  });
+
   it("snapshots via the given send when enabled", async () => {
     const outPath = path.join(tmpDir, "state.json");
     vi.mocked(getRuntimeConfig).mockReturnValue({
@@ -137,7 +161,7 @@ describe("snapshotSessionStateViaSend", () => {
       throw new Error(`unexpected ${method}`);
     };
 
-    await snapshotSessionStateViaSend(send);
+    await snapshotSessionStateViaSend(send, "openclaw");
 
     const written = JSON.parse(await fs.readFile(outPath, "utf8"));
     expect(written.cookies).toEqual(cookies);
@@ -149,7 +173,7 @@ describe("snapshotSessionStateViaSend", () => {
     } as unknown as ReturnType<typeof getRuntimeConfig>);
 
     const send = vi.fn(async () => ({}));
-    await snapshotSessionStateViaSend(send as unknown as CdpSendFn);
+    await snapshotSessionStateViaSend(send as unknown as CdpSendFn, "openclaw");
 
     expect(send).not.toHaveBeenCalled();
     expect(await fs.readdir(tmpDir)).toEqual([]);

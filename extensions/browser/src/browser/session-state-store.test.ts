@@ -1,22 +1,34 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CdpSendFn } from "./cdp.helpers.js";
+import * as navigationGuard from "./navigation-guard.js";
+import { createPageViaPlaywright } from "./pw-session-actions.js";
 import {
   resolveSessionStateConfig,
+  resolveProfileSessionStatePath,
   restoreSessionState,
-  SESSION_STATE_VERSION,
   snapshotSessionState,
 } from "./session-state-store.js";
+
+vi.mock("./pw-session-actions.js", () => ({ createPageViaPlaywright: vi.fn() }));
+const nativeAssertNavigation = navigationGuard.assertBrowserNavigationAllowed;
+const navigation = { cdpUrl: "http://127.0.0.1:18800" };
 
 let tmpDir: string;
 
 beforeEach(async () => {
+  vi.spyOn(navigationGuard, "assertBrowserNavigationAllowed").mockResolvedValue(undefined);
+  vi.mocked(createPageViaPlaywright)
+    .mockReset()
+    .mockResolvedValue({ targetId: "t1", title: "", url: "https://example.com", type: "page" });
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "session-state-"));
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -34,6 +46,118 @@ function mockSend(handlers: Record<string, Handler>): CdpSendFn {
 }
 
 describe("snapshotSessionState", () => {
+  it("does not attribute a navigated document's storage to its former origin", async () => {
+    const outPath = path.join(tmpDir, "state.json");
+    const send = mockSend({
+      "Storage.getCookies": () => ({ cookies: [] }),
+      "Target.getTargets": () => ({
+        targetInfos: [{ type: "page", targetId: "t1", url: "https://a.example" }],
+      }),
+      "Target.attachToTarget": () => ({ sessionId: "s1" }),
+      "Runtime.evaluate": (params) => ({
+        result: {
+          value: runInNewContext(
+            String(params?.expression),
+            {
+              location: { origin: "https://b.example" },
+              localStorage: { token: "b-secret" },
+            },
+            { timeout: 100 },
+          ),
+        },
+      }),
+      "Target.detachFromTarget": () => ({}),
+    });
+    expect(await snapshotSessionState(send, outPath)).toEqual({ cookies: 0, origins: 0 });
+    expect(await fs.readFile(outPath, "utf8")).not.toContain("b-secret");
+  });
+
+  it.each(["closed", "failed", "empty"])(
+    "retains unobserved storage but honors authoritative empty reads (%s)",
+    async (mode) => {
+      const filePath = path.join(tmpDir, "state.json");
+      await fs.writeFile(
+        filePath,
+        JSON.stringify({
+          version: 1,
+          cookies: [],
+          origins: [{ origin: "https://example.com", localStorage: { token: "retained" } }],
+        }),
+      );
+      const origin = "https://example.com";
+      let writes = 0;
+      const restoreSend = mockSend({
+        "Target.attachToTarget": () => ({ sessionId: "s1" }),
+        "Runtime.evaluate": (params) => ({
+          result: {
+            value: runInNewContext(
+              String(params?.expression),
+              {
+                location: { origin },
+                localStorage: {
+                  setItem: () => {
+                    writes++;
+                  },
+                },
+              },
+              { timeout: 100 },
+            ),
+          },
+        }),
+        "Target.closeTarget": () => ({}),
+      });
+      expect((await restoreSessionState(restoreSend, filePath, navigation))?.origins).toBe(1);
+      const snapshotSend = mockSend({
+        "Storage.getCookies": () => ({ cookies: [] }),
+        "Target.getTargets": () => ({
+          targetInfos: mode === "closed" ? [] : [{ type: "page", targetId: "t1", url: origin }],
+        }),
+        "Target.attachToTarget": () => ({ sessionId: "s1" }),
+        "Runtime.evaluate": () => {
+          if (mode === "failed") {
+            throw new Error("document unavailable");
+          }
+          return { result: { value: { origin, localStorage: {} } } };
+        },
+        "Target.detachFromTarget": () => ({}),
+      });
+      await snapshotSessionState(snapshotSend, filePath);
+      const next = await restoreSessionState(restoreSend, filePath, navigation);
+      expect(next?.origins).toBe(mode === "empty" ? 0 : 1);
+      expect(writes).toBe(mode === "empty" ? 1 : 2);
+    },
+  );
+
+  it("isolates two canonical profiles across snapshot and restart", async () => {
+    const basePath = path.join(tmpDir, "state.json");
+    for (const profile of ["openclaw", "work"]) {
+      await snapshotSessionState(
+        mockSend({
+          "Storage.getCookies": () => ({
+            cookies: [{ name: "sid", value: profile, domain: "example.com", path: "/" }],
+          }),
+          "Target.getTargets": () => ({ targetInfos: [] }),
+        }),
+        resolveProfileSessionStatePath(basePath, profile),
+      );
+    }
+    expect(resolveProfileSessionStatePath(basePath, "openclaw")).toBe(basePath);
+    for (const profile of ["openclaw", "work"]) {
+      const restored: unknown[] = [];
+      await restoreSessionState(
+        mockSend({
+          "Storage.setCookies": (params) => {
+            restored.push(params?.cookies);
+            return {};
+          },
+        }),
+        resolveProfileSessionStatePath(basePath, profile),
+      );
+      expect(restored).toEqual([
+        [{ name: "sid", value: profile, domain: "example.com", path: "/" }],
+      ]);
+    }
+  });
   it("writes a v1 JSON with cookies and per-origin localStorage", async () => {
     const cookies = [{ name: "sid", value: "abc", domain: "example.com", path: "/" }];
     const send = mockSend({
@@ -51,7 +175,9 @@ describe("snapshotSessionState", () => {
         ],
       }),
       "Target.attachToTarget": (params) => ({ sessionId: `sess-${String(params?.targetId)}` }),
-      "Runtime.evaluate": () => ({ result: { value: { token: "xyz", n: 5 } } }),
+      "Runtime.evaluate": () => ({
+        result: { value: { origin: "https://example.com", localStorage: { token: "xyz", n: 5 } } },
+      }),
       "Target.detachFromTarget": () => ({}),
     });
 
@@ -61,7 +187,7 @@ describe("snapshotSessionState", () => {
     expect(result).toEqual({ cookies: 1, origins: 1 });
 
     const written = JSON.parse(await fs.readFile(outPath, "utf8"));
-    expect(written.version).toBe(SESSION_STATE_VERSION);
+    expect(written.version).toBe(1);
     expect(typeof written.savedAt).toBe("string");
     expect(written.cookies).toEqual(cookies);
     // non-string localStorage values (n:5) are dropped
@@ -89,6 +215,63 @@ describe("snapshotSessionState", () => {
 });
 
 describe("restoreSessionState", () => {
+  it("rejects a strict-policy persisted private origin before creating a page", async () => {
+    vi.mocked(navigationGuard.assertBrowserNavigationAllowed).mockImplementation(
+      nativeAssertNavigation,
+    );
+    const filePath = path.join(tmpDir, "state.json");
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        cookies: [],
+        origins: [{ origin: "http://169.254.169.254", localStorage: { token: "never-send" } }],
+      }),
+    );
+    const send = vi.fn<CdpSendFn>();
+    expect(
+      await restoreSessionState(send, filePath, {
+        ...navigation,
+        ssrfPolicy: { dangerouslyAllowPrivateNetwork: false },
+      }),
+    ).toEqual({ cookies: 0, origins: 0 });
+    expect(createPageViaPlaywright).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("checks the expected origin in the same evaluation that writes secrets", async () => {
+    const filePath = path.join(tmpDir, "state.json");
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        cookies: [],
+        origins: [{ origin: "https://example.com", localStorage: { token: "a-secret" } }],
+      }),
+    );
+    const setItem = vi.fn();
+    let reads = 0;
+    const close = vi.fn(() => ({}));
+    const send = mockSend({
+      "Target.attachToTarget": () => ({ sessionId: "s1" }),
+      "Runtime.evaluate": (params) => ({
+        result: {
+          value: runInNewContext(
+            String(params?.expression),
+            {
+              location: { origin: reads++ === 0 ? "https://example.com" : "https://evil.example" },
+              localStorage: { setItem },
+            },
+            { timeout: 100 },
+          ),
+        },
+      }),
+      "Target.closeTarget": close,
+    });
+    expect((await restoreSessionState(send, filePath, navigation))?.origins).toBe(0);
+    expect(setItem).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalled();
+  });
   it("returns null when the snapshot file is absent (no CDP calls)", async () => {
     const calls: string[] = [];
     const send: CdpSendFn = async (method) => {
@@ -119,7 +302,7 @@ describe("restoreSessionState", () => {
     await fs.writeFile(
       filePath,
       JSON.stringify({
-        version: SESSION_STATE_VERSION,
+        version: 1,
         savedAt: new Date().toISOString(),
         cookies,
         origins: [{ origin: "https://example.com", localStorage: { token: "xyz" } }],
@@ -137,7 +320,7 @@ describe("restoreSessionState", () => {
       "Target.attachToTarget": () => ({ sessionId: "s1" }),
       "Runtime.evaluate": (params) => {
         const expr = typeof params?.expression === "string" ? params.expression : "";
-        if (expr.includes("location.origin")) {
+        if (expr === "location.origin") {
           return { result: { value: "https://example.com" } };
         }
         setItemsExpr = expr;
@@ -146,11 +329,15 @@ describe("restoreSessionState", () => {
       "Target.closeTarget": () => ({}),
     });
 
-    const result = await restoreSessionState(send, filePath);
+    const result = await restoreSessionState(send, filePath, navigation);
     expect(result).toEqual({ cookies: 1, origins: 1 });
     expect(setCookiesArg).toEqual(cookies);
     expect(setItemsExpr).toContain("token");
     expect(setItemsExpr).toContain("localStorage.setItem");
+    expect(createPageViaPlaywright).toHaveBeenCalledWith({
+      ...navigation,
+      url: "https://example.com",
+    });
   });
 
   it("normalizes a session cookie's expires:-1 so Chrome stores it (not drops it)", async () => {
@@ -174,7 +361,7 @@ describe("restoreSessionState", () => {
     await fs.writeFile(
       filePath,
       JSON.stringify({
-        version: SESSION_STATE_VERSION,
+        version: 1,
         savedAt: new Date().toISOString(),
         cookies,
         origins: [],
@@ -212,7 +399,7 @@ describe("restoreSessionState", () => {
     const filePath = path.join(tmpDir, "state.json");
     await fs.writeFile(
       filePath,
-      JSON.stringify({ version: SESSION_STATE_VERSION, savedAt: "x", cookies, origins: [] }),
+      JSON.stringify({ version: 1, savedAt: "x", cookies, origins: [] }),
     );
 
     let bulkTried = false;

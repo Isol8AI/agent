@@ -246,13 +246,16 @@ function assertOpenClawStateDatabaseFreshOpenAllowedAtPath(
 }
 
 /** Close one cached shared state database handle by exact pathname. */
-export function closeOpenClawStateDatabaseByPath(pathname: string): boolean {
+export function closeOpenClawStateDatabaseByPath(
+  pathname: string,
+  options?: Parameters<OpenClawStateDatabase["walMaintenance"]["close"]>[0],
+): boolean {
   const resolvedPath = path.resolve(pathname);
   const database = cachedDatabases.get(resolvedPath);
   if (!database) {
     return false;
   }
-  database.walMaintenance.close({ checkpointMode: "PASSIVE" });
+  database.walMaintenance.close({ checkpointMode: "PASSIVE", ...options });
   if (database.db.isOpen) {
     database.db.close();
   }

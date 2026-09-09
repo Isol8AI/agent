@@ -9,10 +9,12 @@ export function validateInputs(tag, sha) {
     tag !== tag.trim() ||
     typeof sha !== "string" ||
     sha !== sha.trim()
-  )
+  ) {
     throw new Error("Invalid candidate tag or release SHA");
-  if (!/^v2026\.9\.3-isol8\.[1-9][0-9]*$/.test(tag ?? "") || !/^[a-f0-9]{40}$/.test(sha ?? ""))
+  }
+  if (!/^v2026\.9\.3-isol8\.[1-9][0-9]*$/.test(tag ?? "") || !/^[a-f0-9]{40}$/.test(sha ?? "")) {
     throw new Error("Invalid candidate tag or release SHA");
+  }
 }
 export function identity(
   tag,
@@ -22,18 +24,24 @@ export function identity(
 ) {
   validateInputs(tag, sha);
   const ref = "refs/tags/" + tag;
-  if (git("cat-file", "-t", ref) !== "tag") throw new Error("Candidate must be annotated");
+  if (git("cat-file", "-t", ref) !== "tag") {
+    throw new Error("Candidate must be annotated");
+  }
   const object = git("rev-parse", ref);
-  if (git("rev-parse", ref + "^{commit}") !== sha || git("rev-parse", "HEAD") !== sha)
+  if (git("rev-parse", ref + "^{commit}") !== sha || git("rev-parse", "HEAD") !== sha) {
     throw new Error("Candidate source identity mismatch");
+  }
   git("merge-base", "--is-ancestor", BASE, sha);
-  if (version !== "2026.9.3") throw new Error("Wrong package version");
+  if (version !== "2026.9.3") {
+    throw new Error("Wrong package version");
+  }
   return { tag, sha, object, version: tag.slice(1) };
 }
 export function classifyManifest(status, body, digest, expected) {
   if (expected !== undefined) {
-    if (status !== 200 || !/^sha256:[a-f0-9]{64}$/.test(expected) || digest !== expected)
+    if (status !== 200 || !/^sha256:[a-f0-9]{64}$/.test(expected) || digest !== expected) {
       throw new Error("Published digest mismatch");
+    }
     return digest;
   }
   if (
@@ -41,8 +49,9 @@ export function classifyManifest(status, body, digest, expected) {
     Array.isArray(body?.errors) &&
     body.errors.length > 0 &&
     body.errors.every((error) => error?.code === "MANIFEST_UNKNOWN")
-  )
-    return;
+  ) {
+    return undefined;
+  }
   throw new Error(status === 200 ? "Candidate tag already exists" : "Registry absence is unproven");
 }
 async function github(route) {
@@ -53,23 +62,30 @@ async function github(route) {
     },
     signal: AbortSignal.timeout(30000),
   });
-  if (!response.ok) throw new Error("GitHub identity lookup failed: " + response.status);
+  if (!response.ok) {
+    throw new Error("GitHub identity lookup failed: " + response.status);
+  }
   return response.json();
 }
 async function verifyRemote(candidate) {
   const repository = process.env.GITHUB_REPOSITORY;
-  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? ""))
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? "")) {
     throw new Error("Invalid repository");
+  }
   const ref = await github("repos/" + repository + "/git/ref/tags/" + candidate.tag);
-  if (ref.object?.type !== "tag" || ref.object.sha !== candidate.object)
+  if (ref.object?.type !== "tag" || ref.object.sha !== candidate.object) {
     throw new Error("Remote tag changed");
+  }
   const tag = await github("repos/" + repository + "/git/tags/" + candidate.object);
-  if (tag.object?.type !== "commit" || tag.object.sha !== candidate.sha)
+  if (tag.object?.type !== "commit" || tag.object.sha !== candidate.sha) {
     throw new Error("Remote peeled source changed");
+  }
 }
 async function registry(version, expected) {
   const pkg = await github("orgs/TheLightbulbCompany/packages/container/agent");
-  if (pkg.visibility !== "private") throw new Error("GHCR package is not private");
+  if (pkg.visibility !== "private") {
+    throw new Error("GHCR package is not private");
+  }
   const auth = await fetch(
     "https://ghcr.io/token?service=ghcr.io&scope=repository:thelightbulbcompany/agent:pull",
     {
@@ -81,9 +97,13 @@ async function registry(version, expected) {
       signal: AbortSignal.timeout(30000),
     },
   );
-  if (!auth.ok) throw new Error("Registry authentication failed: " + auth.status);
+  if (!auth.ok) {
+    throw new Error("Registry authentication failed: " + auth.status);
+  }
   const { token } = await auth.json();
-  if (typeof token !== "string" || !token) throw new Error("Missing registry token");
+  if (typeof token !== "string" || !token) {
+    throw new Error("Missing registry token");
+  }
   const response = await fetch(
     "https://ghcr.io/v2/thelightbulbcompany/agent/manifests/" + version,
     {
@@ -118,14 +138,17 @@ async function main() {
         "\n",
     );
   } else if (process.argv[2] === "absent") {
-    if (candidate.object !== process.env.TAG_OBJECT) throw new Error("Local tag changed");
+    if (candidate.object !== process.env.TAG_OBJECT) {
+      throw new Error("Local tag changed");
+    }
     await registry(candidate.version);
   } else if (process.argv[2] === "proof") {
     if (
       candidate.object !== process.env.TAG_OBJECT ||
       !/^sha256:[a-f0-9]{64}$/.test(process.env.BUILD_DIGEST ?? "")
-    )
+    ) {
       throw new Error("Missing or changed build identity");
+    }
     const digest = await registry(candidate.version, process.env.BUILD_DIGEST);
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
@@ -153,11 +176,15 @@ async function main() {
         digest +
         "\n",
     );
-  } else throw new Error("Unknown verification phase");
+  } else {
+    throw new Error("Unknown verification phase");
+  }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
-    console.error(error.message);
-    process.exitCode = 1;
-  });
+  main().catch(
+    /** @param {unknown} error */ (error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exitCode = 1;
+    },
+  );
 }

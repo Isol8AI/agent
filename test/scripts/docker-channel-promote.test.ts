@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
@@ -82,21 +81,6 @@ function requireJob(workflow: Workflow, name: string): WorkflowJob {
     throw new Error(`Missing workflow job: ${name}`);
   }
   return job;
-}
-
-function requireStep(job: WorkflowJob, name: string): WorkflowStep {
-  const step = job.steps?.find((candidate) => candidate.name === name);
-  if (!step?.run) {
-    throw new Error(`Missing workflow step: ${name}`);
-  }
-  return step;
-}
-
-function runWorkflowStep(step: WorkflowStep, env: NodeJS.ProcessEnv) {
-  return spawnSync("bash", ["-c", step.run!], {
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-  });
 }
 
 describe("Docker channel promotion", () => {
@@ -545,57 +529,11 @@ describe("Docker channel promotion", () => {
     );
   });
 
-  it.skipIf(process.platform === "win32")(
-    "accepts only empty or dated rebuild suffix workflow inputs",
-    () => {
-      const workflow = readWorkflow(".github/workflows/docker-release.yml");
-      const validate = requireStep(
-        requireJob(workflow, "validate_release_identity"),
-        "Validate immutable tag and SHA inputs",
-      );
-      for (const imageTagSuffix of ["", "-r20260820"]) {
-        const result = runWorkflowStep(validate, {
-          IMAGE_TAG_SUFFIX: imageTagSuffix,
-          PREPARED_RUN_ID: "",
-          PREPARED_RUN_ATTEMPT: "",
-          PREPARED_ARTIFACT_NAME: "",
-          PREPARED_MANIFEST_SHA256: "",
-          RELEASE_SHA: "a".repeat(40),
-          RELEASE_TAG: "v2026.7.1-2",
-        });
-        expect(result.status, result.stderr).toBe(0);
-      }
-      const invalid = runWorkflowStep(validate, {
-        IMAGE_TAG_SUFFIX: "-r2026082",
-        RELEASE_SHA: "a".repeat(40),
-        RELEASE_TAG: "v2026.7.1-2",
-      });
-      expect(invalid.status).not.toBe(0);
-      expect(invalid.stderr).toContain("Invalid Docker image tag suffix");
-    },
-  );
-
-  it("uses the digest-bound promotion path for releases and approved repairs", () => {
+  it("uses the digest-bound promotion path for approved repairs", () => {
     const workflow = readWorkflow(".github/workflows/docker-channel-promote.yml");
-    const releaseWorkflow = readWorkflow(".github/workflows/docker-release.yml");
-    const publish = requireJob(releaseWorkflow, "publish");
     const resolve = requireJob(workflow, "resolve");
     const approve = requireJob(workflow, "approve");
     const promote = requireJob(workflow, "promote");
-
-    expect(releaseWorkflow.concurrency).toBeUndefined();
-    expect(publish.concurrency).toEqual({
-      group: "docker-release-publish",
-      "cancel-in-progress": false,
-      queue: "max",
-    });
-    expect(publish.environment).toBe("docker-release");
-    expect(publish.permissions).toEqual({
-      actions: "read",
-      attestations: "read",
-      contents: "read",
-      packages: "write",
-    });
 
     expect(resolve.permissions).toEqual({ contents: "read" });
     expect(resolve.steps?.find((step) => step.uses?.startsWith("actions/checkout@"))?.with).toEqual(

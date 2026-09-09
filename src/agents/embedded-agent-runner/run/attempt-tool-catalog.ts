@@ -1,6 +1,7 @@
 /**
  * Prepares the attempt-local tool catalog, schema projection, and diagnostics.
  */
+import { racePromiseWithAbortSignal } from "../../../infra/abort-signal.js";
 import type { DiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import {
   isCodeModeDiagnosticEnabled,
@@ -52,11 +53,26 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
   attempt: EmbeddedRunAttemptParams;
   setup: EmbeddedAttemptSetup;
   preparedToolBase: PreparedToolBase;
-  bundleTools: Pick<PreparedBundleTools, "clientTools" | "uncompactedEffectiveTools">;
+  bundleTools: Pick<PreparedBundleTools, "clientTools" | "uncompactedEffectiveTools"> &
+    Partial<Pick<PreparedBundleTools, "bundleMcpRuntime" | "refreshTools">>;
   runTrace: DiagnosticTraceContext;
   abortSignal: AbortSignal;
   executeCodeModeTool: ToolSearchCatalogToolExecutor;
 }) {
+  let coldCatalogApplied = false;
+  const awaitColdCatalog = async (signal: AbortSignal = input.abortSignal) => {
+    const ready = input.bundleTools.bundleMcpRuntime?.ready;
+    if (!ready || coldCatalogApplied) {
+      return;
+    }
+    await racePromiseWithAbortSignal(ready, signal);
+    signal.throwIfAborted();
+    if (!coldCatalogApplied) {
+      coldCatalogApplied = true;
+      input.bundleTools.refreshTools?.();
+      refreshTools();
+    }
+  };
   const buildCatalog = () => {
     const { attempt, preparedToolBase } = input;
     const {
@@ -152,7 +168,18 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
     }
     effectiveTools = toolSearchSchemaProjection.tools.map((tool) =>
       wrapEmbeddedAttemptToolWithActivity(
-        wrapToolWithAbortSignal(tool, abortSignal),
+        wrapToolWithAbortSignal(
+          toolSearchConfig.mode === "directory" && TOOL_SEARCH_CONTROL_TOOL_NAMES.has(tool.name)
+            ? copyAgentToolAvailability(tool, {
+                ...tool,
+                execute: async (...args) => {
+                  await awaitColdCatalog(args[2]);
+                  return tool.execute(...args);
+                },
+              })
+            : tool,
+          abortSignal,
+        ),
         attempt.runId,
       ),
     );
@@ -243,6 +270,31 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
     liveAllowedToolNames: new Set(current.toolSearchRunPlan.liveAllowedToolNames),
     capabilityToolNames: new Set(current.toolSearchRunPlan.capabilityToolNames),
   };
+  const refreshTools = () => {
+    const next = buildCatalog();
+    current.effectiveTools.splice(0, current.effectiveTools.length, ...next.effectiveTools);
+    for (const key of [
+      "visibleAllowedToolNames",
+      "liveAllowedToolNames",
+      "capabilityToolNames",
+      "replayAllowedToolNames",
+    ] as const) {
+      const target = current.toolSearchRunPlan[key];
+      // Earlier tool calls remain valid history, even after their live authority is revoked.
+      if (key !== "replayAllowedToolNames") {
+        target.clear();
+      }
+      for (const name of next.toolSearchRunPlan[key]) {
+        target.add(name);
+      }
+    }
+    Object.assign(current.toolSearch, next.toolSearch);
+    for (const key of promptPlanKeys) {
+      hostPromptPlan[key] = new Set(next.toolSearchRunPlan[key]);
+    }
+    current.emptyExplicitToolAllowlistError = next.emptyExplicitToolAllowlistError;
+    current.toolSearchRunPlan.hasCallableTools = next.toolSearchRunPlan.hasCallableTools;
+  };
   return Object.assign(current, {
     applyPromptToolPolicy: (allowedNames: ReadonlySet<string>) => {
       if (!current.toolSearch.catalogRegistered) {
@@ -260,31 +312,7 @@ export function prepareEmbeddedAttemptToolCatalog(input: {
         }
       }
     },
-    refreshTools: () => {
-      const next = buildCatalog();
-      current.effectiveTools.splice(0, current.effectiveTools.length, ...next.effectiveTools);
-      for (const key of [
-        "visibleAllowedToolNames",
-        "liveAllowedToolNames",
-        "capabilityToolNames",
-        "replayAllowedToolNames",
-      ] as const) {
-        const target = current.toolSearchRunPlan[key];
-        // Earlier tool calls remain valid history, even after their live authority is revoked.
-        if (key !== "replayAllowedToolNames") {
-          target.clear();
-        }
-        for (const name of next.toolSearchRunPlan[key]) {
-          target.add(name);
-        }
-      }
-      Object.assign(current.toolSearch, next.toolSearch);
-      for (const key of promptPlanKeys) {
-        hostPromptPlan[key] = new Set(next.toolSearchRunPlan[key]);
-      }
-      current.emptyExplicitToolAllowlistError = next.emptyExplicitToolAllowlistError;
-      current.toolSearchRunPlan.hasCallableTools = next.toolSearchRunPlan.hasCallableTools;
-    },
+    refreshTools,
   });
 }
 
