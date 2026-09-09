@@ -1194,6 +1194,11 @@ export function createHookRunner(
     ctx: PluginHookAgentContext,
     optionsLocal?: VoidHookRunOptions,
   ): Promise<void> {
+    // Completion hooks can persist transcript text into global plugin memory.
+    // Keep this fence even after the private execution has closed or been revoked.
+    if (getPrivateRoomExecution()) {
+      return;
+    }
     return runVoidHook("agent_end", withAgentRunId(event, ctx), ctx, optionsLocal);
   }
 

@@ -1,5 +1,13 @@
 # Task 3 report — private execution and native presence
 
+## Independent review follow-up: completion-hook privacy
+
+The independent review identified a global-memory leak through `agent_end`: LanceDB's completion consumer extracts and persists user text. The shared `createHookRunner().runAgentEnd` dispatcher now suppresses all completion-hook consumers whenever the existing private execution context is present, including completion after revocation/closure. Ordinary executions retain their existing hook dispatch. This is not a LanceDB-specific exception.
+
+Caller trace: embedded `attempt-finalize` and CLI `cli-run-transcript`, plus Copilot and Codex provider wrappers, reach `runAgentEndSideEffects` / `awaitAgentEndSideEffects`, then the single `executeAgentHarnessAgentEndHook` caller of `runAgentEnd`. Both awaited and fire-and-forget variants preserve the async-local private execution context; private v1 independently rejects non-OpenClaw harnesses. Direct hook-runner consumers meet the same root fence. The separate internal session `agent_end` lifecycle event is not the plugin `agent_end` dispatcher and was not modified.
+
+Added `src/plugins/hooks.private-room.test.ts` using the real hook dispatcher and two registered consumers. Source cases cover successful/failed private completions, an awaited boundary, revoked completion, and unchanged ordinary dispatch afterward. No tests, lint, typecheck, build, checks, formatter, or autoreview were executed for this correction.
+
 ## Delivery
 
 - Worktree: `/Users/prasiddhaparthsarthy/Desktop/isol8.nosync/.worktrees/openclaw-room-isolation-presence`
