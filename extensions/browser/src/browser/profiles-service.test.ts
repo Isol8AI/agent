@@ -211,7 +211,7 @@ describe("BrowserProfilesService", () => {
   it.each(["reset", "delete"] as const)(
     "retires snapshots after in-flight writers before %s profile reuse",
     async (operation) => {
-      const root = await tempDirs.make("browser-session-retirement-");
+      const root = tempDirs.make("browser-session-retirement-");
       const snapshotBase = path.join(root, "state.json");
       const snapshotPath = resolveProfileSessionStatePath(snapshotBase, "work");
       const siblingPath = resolveProfileSessionStatePath(snapshotBase, "sibling");
