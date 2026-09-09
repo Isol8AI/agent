@@ -459,7 +459,14 @@ describe("chat session sharing menu", () => {
           loading: false,
           result: {
             sessionKey: "agent:main:main",
-            members: [{ identityId: "alice", addedBy: "owner", addedAt: 1 }],
+            members: [
+              {
+                identity: { type: "profile", id: "alice" },
+                identityId: "alice",
+                addedBy: "owner",
+                addedAt: 1,
+              },
+            ],
             identities: [
               {
                 type: "human",

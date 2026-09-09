@@ -233,10 +233,10 @@ export function resolveCanonicalSessionStoreMatchFromStoreKeys<TEntry extends Se
   return selected;
 }
 
-export function resolveCanonicalSessionEntryFromStoreKeys<TEntry extends SessionEntry>(
-  store: Record<string, TEntry>,
+export function resolveCanonicalSessionEntryFromStoreKeys(
+  store: Record<string, SessionEntry>,
   storeKeys: string[],
-): TEntry | undefined {
+): SessionEntry | undefined {
   return resolveCanonicalSessionStoreMatchFromStoreKeys(store, storeKeys)?.entry;
 }
 
