@@ -170,15 +170,15 @@ describe("native room presence lifecycle", () => {
   });
 
   it("revokes every actor lease and its subscription immediately without converting failed ACL reads into offline", () => {
-    let access: "allowed" | "denied" | "failed" = "allowed";
+    let permission: "allowed" | "denied" | "failed" = "allowed";
     const revocable = {
       actor,
       sessionId: "session-room",
       isAuthorized: () => {
-        if (access === "failed") {
+        if (permission === "failed") {
           throw new Error("storage unavailable");
         }
-        return access === "allowed";
+        return permission === "allowed";
       },
     };
     const emit = vi.fn();
@@ -186,7 +186,7 @@ describe("native room presence lifecycle", () => {
     presence.subscribe("one", room, revocable);
     presence.update("one", room, revocable, online);
     presence.update("two", room, revocable, online);
-    access = "failed";
+    permission = "failed";
     expect(presence.snapshot(room, revocable)).toMatchObject({
       inventoryStatus: "failed",
       connections: [],
@@ -205,7 +205,7 @@ describe("native room presence lifecycle", () => {
       inventoryStatus: "incomplete",
       connections: [expect.objectContaining({ actor: { type: "agent", id: "runtime-agent" } })],
     });
-    access = "denied";
+    permission = "denied";
     presence.revalidate();
     expect(
       presence
@@ -391,7 +391,7 @@ describe("native presence evidence", () => {
     projectionAt + 1,
     projectionAt + 0.5,
     "2027-01-15T08:00:00Z",
-    NaN,
+    Number.NaN,
     Infinity,
   ])("does not coerce invalid start or observation evidence %s", (value) => {
     expect(

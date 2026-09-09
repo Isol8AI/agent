@@ -3,13 +3,13 @@ import {
   NATIVE_PRESENCE_MAX_CONNECTIONS,
   PRESENCE_AVAILABLE_ACTIVITY_MS,
   PRESENCE_EXPIRES_AFTER_MS,
+  SESSION_VIEWER_PRESENCE_MAX_KEYS,
   TYPING_EXPIRES_AFTER_MS,
   TYPING_THROTTLE_MS,
   type NativePresenceActor,
   type NativePresenceEvent,
   type NativePresenceSnapshot,
 } from "../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
-import { SESSION_VIEWER_PRESENCE_MAX_KEYS } from "../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
 
 export type NativePresenceAuthority = {
   actor: NativePresenceActor;

@@ -266,6 +266,7 @@ export const dispatchSessionExecution: GatewayRequestHandler = async (options) =
               target.canonicalKey,
               {
                 actor: { type: "agent", id: target.agentId },
+                sessionId: scope.sessionId,
                 isAuthorized: () => {
                   try {
                     assertCurrent();

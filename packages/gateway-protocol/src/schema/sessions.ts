@@ -12,6 +12,11 @@ import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sess
 import { SessionOwnerSchema } from "./sessions-row.js";
 
 export {
+  SessionMessageAppendParamsSchema,
+  SessionMessageAppendResultSchema,
+} from "./sessions-create.js";
+export { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema } from "./sessions-create.js";
+export {
   RoomKindSchema,
   ThreadOriginSchema,
   type RoomKind,
