@@ -30,7 +30,8 @@ Added `src/plugins/hooks.private-room.test.ts` using the real hook dispatcher an
 - Branch: `codex/openclaw-room-isolation-presence`
 - Original reviewed base/tip: `9882de4e5d5d4db76cdd2bb168af323e188a83fe` / `4c0c479119c5b65fc90e95c7aa05d55c0487c045`.
 - Current stacked base: `78d28587ea8488d7e350330c050fbe66b9ab912f` (`codex/openclaw-room-append`).
-- Current commits: feature `2c136087ae870cd3ce83e792b5afeb9cbbcbbb3e`, report `0f7bfb415543c38842de186efec71690ebc87c71`, completion-hook fence `5ee4dd52f18ec8b1bdb9f82dcfe6b63fb5bdd81f`, and command/archive isolation `935ca10fa4ea96e1e3fd4244471dcad68fe8e077`.
+- Core Task 3 commits: feature `2c136087ae870cd3ce83e792b5afeb9cbbcbbb3e`, report `0f7bfb415543c38842de186efec71690ebc87c71`, completion-hook fence `5ee4dd52f18ec8b1bdb9f82dcfe6b63fb5bdd81f`, and command/archive isolation `935ca10fa4ea96e1e3fd4244471dcad68fe8e077`.
+- Post-review integration commits: durable state-root room files `8ecc1ed2cd20ebbeca9966b6f47dcb0c25fc4488`, trusted broker profile binding `31cbfae2f36210fb506328ed6735cec434cbeb22`, and paired-device/token/canonical-signature hardening `cab4fb48128ee00e43eb0f0994f5a17828ff1864`.
 - The rebased branch is pushed for a stacked PR. The deterministic Kotlin protocol generator resolved the overlapping PR #9/Task 3 generated model during rebase; no local validation ran.
 
 ## Implemented boundaries
