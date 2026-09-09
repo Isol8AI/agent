@@ -41,8 +41,12 @@ export {
   RoomKindSchema,
   SESSION_CREATE_IDEMPOTENCY_RETENTION_MS,
   SESSION_CREATE_RETRY_WINDOW_MS,
+  SessionMessageAppendParamsSchema,
+  SessionMessageAppendResultSchema,
   SessionsRoomCreateParamsSchema,
   ThreadOriginSchema,
+  type SessionMessageAppendParams,
+  type SessionMessageAppendResult,
 } from "./schema/sessions-create.js";
 export { TASKS_LIST_CURSOR_MAX_LENGTH } from "./schema/tasks.js";
 export * from "./schema/projects.js";

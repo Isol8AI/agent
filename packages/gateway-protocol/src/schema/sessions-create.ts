@@ -1,3 +1,4 @@
+import type { Static } from "typebox";
 import { Type } from "typebox";
 import { closedObject } from "./closed-object.js";
 import { HumanMentionsSchema } from "./human-mentions.js";
@@ -124,3 +125,32 @@ export const SessionsRoomCreateParamsSchema = closedObject({
   members: Type.Array(SessionMemberIdentitySchema, { maxItems: 128 }),
   threadOrigin: Type.Optional(ThreadOriginSchema),
 });
+
+export const SessionMessageAppendParamsSchema = closedObject({
+  sessionKey: NonEmptyString,
+  expectedSessionId: NonEmptyString,
+  idempotencyKey: NonEmptyString,
+  text: Type.String({ minLength: 1, maxLength: 100_000 }),
+  replyToId: Type.Optional(NonEmptyString),
+  mentions: Type.Optional(
+    Type.Array(
+      closedObject({
+        type: Type.Union([Type.Literal("profile"), Type.Literal("agent")]),
+        id: NonEmptyString,
+      }),
+      { maxItems: 100 },
+    ),
+  ),
+});
+
+export const SessionMessageAppendResultSchema = closedObject({
+  sessionKey: NonEmptyString,
+  sessionId: NonEmptyString,
+  messageId: NonEmptyString,
+  messageSeq: Type.Integer({ minimum: 1 }),
+  effectiveParentId: Type.Optional(NonEmptyString),
+  appended: Type.Boolean(),
+});
+
+export type SessionMessageAppendParams = Static<typeof SessionMessageAppendParamsSchema>;
+export type SessionMessageAppendResult = Static<typeof SessionMessageAppendResultSchema>;

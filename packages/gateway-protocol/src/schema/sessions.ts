@@ -11,7 +11,14 @@ import { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema } from "./se
 import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sessions-recover.js";
 import { SessionOwnerSchema } from "./sessions-row.js";
 
-export { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema };
+export {
+  SessionMessageAppendParamsSchema,
+  SessionMessageAppendResultSchema,
+  SessionsCreateParamsSchema,
+  SessionsRoomCreateParamsSchema,
+  type SessionMessageAppendParams,
+  type SessionMessageAppendResult,
+} from "./sessions-create.js";
 export {
   RoomKindSchema,
   ThreadOriginSchema,
@@ -482,32 +489,6 @@ export const SessionsCreateResultSchema = Type.Object(
   { additionalProperties: true },
 );
 
-export const SessionMessageAppendParamsSchema = closedObject({
-  sessionKey: NonEmptyString,
-  expectedSessionId: NonEmptyString,
-  idempotencyKey: NonEmptyString,
-  text: Type.String({ minLength: 1, maxLength: 100_000 }),
-  replyToId: Type.Optional(NonEmptyString),
-  mentions: Type.Optional(
-    Type.Array(
-      closedObject({
-        type: Type.Union([Type.Literal("profile"), Type.Literal("agent")]),
-        id: NonEmptyString,
-      }),
-      { maxItems: 100 },
-    ),
-  ),
-});
-
-export const SessionMessageAppendResultSchema = closedObject({
-  sessionKey: NonEmptyString,
-  sessionId: NonEmptyString,
-  messageId: NonEmptyString,
-  messageSeq: Type.Integer({ minimum: 1 }),
-  effectiveParentId: Type.Optional(NonEmptyString),
-  appended: Type.Boolean(),
-});
-
 export const SessionsSendParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),
@@ -871,8 +852,6 @@ export type SessionsCreateResult = Static<typeof SessionsCreateResultSchema>;
 export type SessionsRecoverParams = Static<typeof SessionsRecoverParamsSchema>;
 export type SessionsRecoverResult = Static<typeof SessionsRecoverResultSchema>;
 export type SessionsSendParams = Static<typeof SessionsSendParamsSchema>;
-export type SessionMessageAppendParams = Static<typeof SessionMessageAppendParamsSchema>;
-export type SessionMessageAppendResult = Static<typeof SessionMessageAppendResultSchema>;
 export type SessionsMessagesSubscribeParams = Static<typeof SessionsMessagesSubscribeParamsSchema>;
 export type SessionsMessagesUnsubscribeParams = Static<
   typeof SessionsMessagesUnsubscribeParamsSchema

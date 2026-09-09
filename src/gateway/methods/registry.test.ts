@@ -154,7 +154,7 @@ describe("gateway method registry", () => {
     expect(registry.requiresAuthenticatedProfile("projects.list")).toBe(true);
     expect(registry.requiresAuthenticatedProfile("approval.get")).toBe(false);
     expect(registry.requiresAuthenticatedProfile("approval.history")).toBe(false);
-    expect(registry.requiresAuthenticatedProfile("board.data.read")).toBe(false);
+    expect(registry.requiresAuthenticatedProfile("board.data.read")).toBe(true);
     expect(registry.requiresAuthenticatedProfile("board.prompt.authorize")).toBe(false);
     expect(registry.requiresAuthenticatedProfile("talk.client.create")).toBe(false);
     expect(registry.requiresAuthenticatedProfile("talk.session.steer")).toBe(false);

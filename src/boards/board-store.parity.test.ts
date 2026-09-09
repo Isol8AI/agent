@@ -10,6 +10,7 @@ import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { AGENT_V14_SESSION_SHARING_SCHEMA_SQL } from "../state/openclaw-agent-session-sharing-schema.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import type { BoardStore } from "./board-store.js";
 import { createTestBoardStore } from "./board-store.test-support.js";
@@ -600,6 +601,8 @@ describe("SqliteBoardStore persistence", () => {
       DROP TABLE board_widgets;
       DROP TABLE board_tabs;
       DROP TABLE session_participants;
+      DROP TABLE session_members;
+      ${AGENT_V14_SESSION_SHARING_SCHEMA_SQL}
       PRAGMA user_version = 14;
       UPDATE schema_meta SET schema_version = 14 WHERE meta_key = 'primary';
     `);
@@ -698,6 +701,8 @@ describe("SqliteBoardStore persistence", () => {
       COMMIT;
       PRAGMA foreign_keys = ON;
       DROP TABLE session_participants;
+      DROP TABLE session_members;
+      ${AGENT_V14_SESSION_SHARING_SCHEMA_SQL}
       PRAGMA user_version = 14;
       UPDATE schema_meta SET schema_version = 14 WHERE meta_key = 'primary';
     `);

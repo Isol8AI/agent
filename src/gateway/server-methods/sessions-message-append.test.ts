@@ -46,7 +46,7 @@ import {
 } from "./sessions-sharing.test-support.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
-const cfg = { agents: { entries: { main: {}, helper: {} } } };
+const cfg = { agents: { ownership: "explicit" as const, entries: { main: {}, helper: {} } } };
 const params = {
   sessionKey: "agent:main:room",
   expectedSessionId: "room-instance",

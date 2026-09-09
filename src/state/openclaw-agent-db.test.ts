@@ -61,6 +61,7 @@ import {
 } from "./openclaw-agent-db.js";
 import { resolveIncognitoOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "./openclaw-agent-schema.js";
+import { AGENT_V14_SESSION_SHARING_SCHEMA_SQL } from "./openclaw-agent-session-sharing-schema.js";
 import {
   closeOpenClawStateDatabaseForTest,
   OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
@@ -385,20 +386,8 @@ function downgradeCurrentAgentDatabaseToV13(databasePath: string): void {
         ON session_entries(session_id, updated_at DESC, session_key);
       CREATE INDEX idx_agent_session_entries_status
         ON session_entries(status, session_key) WHERE status IS NOT NULL;
-      CREATE TABLE session_members_v13 (
-        session_key TEXT NOT NULL,
-        identity_id TEXT NOT NULL,
-        added_by TEXT NOT NULL,
-        added_at INTEGER NOT NULL,
-        PRIMARY KEY (session_key, identity_id),
-        FOREIGN KEY (session_key) REFERENCES session_entries(session_key) ON DELETE CASCADE
-      ) STRICT;
-      INSERT INTO session_members_v13 (session_key, identity_id, added_by, added_at)
-      SELECT session_key, identity_id, added_by, added_at FROM session_members;
       DROP TABLE session_members;
-      ALTER TABLE session_members_v13 RENAME TO session_members;
-      CREATE INDEX idx_agent_session_members_identity
-        ON session_members(identity_id, session_key);
+      ${AGENT_V14_SESSION_SHARING_SCHEMA_SQL}
       ALTER TABLE transcript_rewrite_watermarks RENAME TO session_transcript_generations;
       CREATE TABLE board_tabs_v13 (
         session_key TEXT NOT NULL,

@@ -441,7 +441,11 @@ async function revokeWithPublicLifecyclePredecessor(
     await mutation?.error;
   }
   expect(await removal).toBeUndefined();
-  expect(respond).toHaveBeenCalledWith(true, { ok: true, ...params }, undefined);
+  expect(respond).toHaveBeenCalledWith(
+    true,
+    { ok: true, ...params, identity: { type: "profile", id: "member" } },
+    undefined,
+  );
   return expectDefined(mutation, "queued fork");
 }
 

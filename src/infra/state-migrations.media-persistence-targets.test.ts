@@ -14,6 +14,7 @@ import {
   OPENCLAW_AGENT_SCHEMA_VERSION,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { AGENT_V14_SESSION_SHARING_SCHEMA_SQL } from "../state/openclaw-agent-session-sharing-schema.js";
 import { assertOpenClawDatabasesReady } from "../state/openclaw-database-preflight.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -43,7 +44,12 @@ function createLegacyAgentDatabase(params: {
   const { DatabaseSync } = requireNodeSqlite();
   const database = new DatabaseSync(databasePath);
   try {
-    database.exec(`DROP TABLE session_participants; PRAGMA user_version = ${PREVIOUS_VERSION};`);
+    database.exec(`
+      DROP TABLE session_participants;
+      DROP TABLE session_members;
+      ${AGENT_V14_SESSION_SHARING_SCHEMA_SQL}
+      PRAGMA user_version = ${PREVIOUS_VERSION};
+    `);
     database
       .prepare("UPDATE schema_meta SET schema_version = ? WHERE meta_key = 'primary'")
       .run(PREVIOUS_VERSION);
