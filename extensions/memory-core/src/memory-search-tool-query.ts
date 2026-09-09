@@ -12,8 +12,8 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
-import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { isRestrictedMemorySession } from "./private-room.js";
+import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { buildMemorySearchUnavailableResult } from "./tools.shared.js";
 
 const MEMORY_SEARCH_POST_FILTER_MAX_CANDIDATES = 200;

@@ -4,6 +4,7 @@ import {
   ensureProfileForEmail,
   ensureProfileForTailscaleIdentity,
   getUserProfileDisplay,
+  getUserProfileListItem,
 } from "../../../state/user-profiles.js";
 import type { GatewayAuthResult } from "../../auth.js";
 import type { createAuthenticatedGitHubIdentitySync } from "../../github-user-identity.js";
@@ -11,6 +12,14 @@ import type { createAuthenticatedGitHubIdentitySync } from "../../github-user-id
 export function resolveAuthenticatedProfile(profileId: string, updatedAt: number) {
   const { id, displayName, avatarRevision, hasAvatar } = getUserProfileDisplay(profileId);
   return { profileId: id, displayName, avatarRevision, hasAvatar, updatedAt };
+}
+
+export function resolveTrustedBrokerProfile(profileId: string) {
+  const profile = getUserProfileListItem(profileId);
+  if (profile.id !== profileId) {
+    throw new Error("trusted broker profile mapping is not canonical");
+  }
+  return resolveAuthenticatedProfile(profile.id, profile.updatedAt);
 }
 
 export async function resolveGatewayConnectUserProfile(params: {

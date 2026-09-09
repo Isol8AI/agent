@@ -47,13 +47,23 @@ test("users.ensureProfile idempotently creates distinct canonical issuer aliases
     const repeated = await ensureProfile({ alias: ALIAS_A });
     const distinct = await ensureProfile({ alias: ALIAS_B });
 
+    const firstPayload = first?.payload;
+    const repeatedPayload = repeated?.payload;
+    const distinctPayload = distinct?.payload;
     expect(first?.ok).toBe(true);
-    expect(validateUsersEnsureProfileResult(first?.payload)).toBe(true);
-    expect(repeated?.payload).toMatchObject({ profile: { id: expect.any(String) } });
-    expect(distinct?.payload).toMatchObject({ profile: { id: expect.any(String) } });
-    const firstId = (first?.payload as { profile: { id: string } }).profile.id;
-    const repeatedId = (repeated?.payload as { profile: { id: string } }).profile.id;
-    const distinctId = (distinct?.payload as { profile: { id: string } }).profile.id;
+    expect(validateUsersEnsureProfileResult(firstPayload)).toBe(true);
+    expect(validateUsersEnsureProfileResult(repeatedPayload)).toBe(true);
+    expect(validateUsersEnsureProfileResult(distinctPayload)).toBe(true);
+    if (
+      !validateUsersEnsureProfileResult(firstPayload) ||
+      !validateUsersEnsureProfileResult(repeatedPayload) ||
+      !validateUsersEnsureProfileResult(distinctPayload)
+    ) {
+      throw new Error("users.ensureProfile returned an invalid result");
+    }
+    const firstId = firstPayload.profile.id;
+    const repeatedId = repeatedPayload.profile.id;
+    const distinctId = distinctPayload.profile.id;
     expect(repeatedId).toBe(firstId);
     expect(distinctId).not.toBe(firstId);
     expect([firstId, distinctId]).not.toContain(GATEWAY_OWNER_PROFILE_ID);

@@ -58,13 +58,14 @@ describe("prepareEmbeddedSkills", () => {
         assertCurrent: () => {},
         close: () => {},
       },
-      () => prepareEmbeddedSkills({
-        includeCodeModeSkills: true,
-        attempt: { config: {} } as EmbeddedRunAttemptParams,
-        effectiveWorkspace: "/tmp/room",
-        sandbox: null,
-        sessionAgentId: "main",
-      }),
+      () =>
+        prepareEmbeddedSkills({
+          includeCodeModeSkills: true,
+          attempt: { config: {} } as EmbeddedRunAttemptParams,
+          effectiveWorkspace: "/tmp/room",
+          sandbox: null,
+          sessionAgentId: "main",
+        }),
     );
     expect(prepared.skillsPrompt).toBe("");
     expect(prepared.codeModeSkills).toEqual([]);

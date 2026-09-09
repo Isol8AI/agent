@@ -49,14 +49,14 @@ export function prepareNativeRoomPresenceAuthority(params: {
       });
       return Boolean(
         current &&
-          current.entry.sessionId === sessionId &&
-          current.storePath === target.storePath &&
-          !authorizeIncognitoSessionTarget({
-            client,
-            sessionKey: target.canonicalKey,
-            target: current,
-          }) &&
-          canReadSessionSharingTarget({ client, cfg, target: current }),
+        current.entry.sessionId === sessionId &&
+        current.storePath === target.storePath &&
+        !authorizeIncognitoSessionTarget({
+          client,
+          sessionKey: target.canonicalKey,
+          target: current,
+        }) &&
+        canReadSessionSharingTarget({ client, cfg, target: current }),
       );
     },
   };

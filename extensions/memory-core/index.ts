@@ -1,7 +1,5 @@
 import { resolveSessionAgentIdStrict } from "openclaw/plugin-sdk/agent-scope-runtime";
 import { createLazyRuntimeModule } from "openclaw/plugin-sdk/lazy-runtime";
-// Memory Core plugin entrypoint registers its OpenClaw integration.
-import { isRestrictedMemorySession } from "./src/private-room.js";
 import {
   jsonResult,
   type MemoryPluginRuntime,
@@ -17,7 +15,6 @@ import type { OpenKeyedStoreOptions } from "openclaw/plugin-sdk/plugin-state-run
 import { configureMemoryCoreDreamingState } from "./src/dreaming-state.js";
 import { registerShortTermPromotionDreaming } from "./src/dreaming.js";
 import { buildMemoryFlushPlan } from "./src/flush-plan.js";
-import "./src/memory/background-context.js";
 import {
   buildMemoryPromptSection,
   MEMORY_GET_TOOL_CONTRACT,
@@ -26,8 +23,11 @@ import {
   type MemoryToolContract,
   type MemoryToolOptions,
 } from "./src/memory-tool-contract.js";
+import "./src/memory/background-context.js";
 import type { MemoryCoreAcquireLocalService } from "./src/memory/embedding-local-service.js";
 import type { MemoryCoreRuntimeHost } from "./src/memory/runtime-host.js";
+// Memory Core plugin entrypoint registers its OpenClaw integration.
+import { isRestrictedMemorySession } from "./src/private-room.js";
 import { registerSessionBackfillGatewayMethods } from "./src/session-backfill-gateway.js";
 
 type MemoryToolsModule = typeof import("./src/tools.js");
@@ -291,8 +291,10 @@ export default definePluginEntry({
       if (ctx.trigger !== "user") {
         return undefined;
       }
-      if (isRestrictedMemorySession({ cfg: (api.runtime.config?.current?.() ?? api.config) as OpenClawConfig,
-        agentId: ctx.agentId, sessionKey: ctx.sessionKey })) {
+      const config = (api.runtime.config?.current?.() ?? api.config) as OpenClawConfig;
+      if (
+        isRestrictedMemorySession({ cfg: config, agentId: ctx.agentId, sessionKey: ctx.sessionKey })
+      ) {
         return undefined;
       }
       try {
@@ -300,7 +302,6 @@ export default definePluginEntry({
         if (!module.isEligibleStandingIntentTurn(ctx)) {
           return undefined;
         }
-        const config = (api.runtime.config?.current?.() ?? api.config) as OpenClawConfig;
         const agentId = resolveSessionAgentIdStrict({
           sessionKey: ctx.sessionKey,
           config,

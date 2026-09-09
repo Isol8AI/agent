@@ -1,5 +1,4 @@
 import { ErrorCodes } from "../../../packages/gateway-protocol/src/index.js";
-import { bindPrivateRoomRun, getPrivateRoomExecution, unbindPrivateRoomRun } from "../../agents/private-room-execution.js";
 import { getAdmittedRunDelegatedAuthority } from "../../agents/admitted-run-context.js";
 import {
   attachAgentCommandAdmissionFacts,
@@ -15,14 +14,19 @@ import {
   type MainSessionRecoveryOwnerLease,
 } from "../../agents/main-session-recovery/main-session-recovery-store.js";
 import { withPreparedModelRuntimePluginGenerationScope } from "../../agents/prepared-model-runtime-generation-scope.js";
+import {
+  bindPrivateRoomRun,
+  getPrivateRoomExecution,
+  unbindPrivateRoomRun,
+} from "../../agents/private-room-execution.js";
 import { resolveScheduledToolPolicyContext } from "../../agents/scheduled-tool-policy.js";
-import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import { isExecutionIdentityCollectionEnabled } from "../../audit/audit-config.js";
 import {
   setChannelSourceTurnId,
   setChannelSourceTurnSameThreadRequired,
 } from "../../auto-reply/reply/source-turn-id.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { isAbortError } from "../../infra/abort-signal.js";
 import type { MediaFact } from "../../media/media-facts.js";
@@ -404,7 +408,7 @@ export function startAgentRunExecution(params: {
                 ? (privateRoomPolicyForEntry(params.sessionEntry)?.allowedCapabilities ?? [])
                     .filter((capability) => capability.startsWith("tool:"))
                     .map((capability) => capability.slice(5))
-                : pluginSubagentToolsAllow ?? params.restoredCronContinuation?.toolsAllow,
+                : (pluginSubagentToolsAllow ?? params.restoredCronContinuation?.toolsAllow),
               runtimePluginToolGrant,
               trustedInternalHandoff: prepared.trustedInternalHandoff,
               pinnedWidgetAuthoring: restartRecoveryContext?.pinnedWidgetAuthoring,

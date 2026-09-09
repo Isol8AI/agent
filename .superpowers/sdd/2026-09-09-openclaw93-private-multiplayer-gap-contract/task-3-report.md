@@ -48,14 +48,14 @@ Added `src/plugins/hooks.private-room.test.ts` using the real hook dispatcher an
 
 ## Main changed areas
 
-| Area | Files / existing seams |
-| --- | --- |
-| Policy and execution | `src/config/sessions/private-room-policy.ts`, `types.ts`, `src/agents/private-room-execution.ts`, `src/gateway/private-room-executions.ts`, `server-methods/sessions-execution.ts`, existing agent-turn/command/transcript paths |
-| Files and tools | `src/agents/sandbox/{private-room,context,runtime-status}.ts`, `agent-tools.ts`, embedded-run tool/bootstrap/skill/compaction paths, `src/gateway/server-methods/sessions-files.ts` |
-| Memory | `extensions/memory-core/src/{private-room,memory-tool-contract,memory-search-tool-query,session-search-visibility,tools.shared}.ts`, plugin hooks, Active Memory, `src/context-engine/registry.ts`, `packages/memory-host-sdk/src/host/session-transcript-corpus.ts` |
-| Presence | `src/gateway/native-room-presence.ts`, `native-room-presence-authority.ts`, `server-methods/sessions-presence.ts`, Gateway lifecycle/context/WebSocket/sharing/viewing/typing/subscription wiring |
-| Protocol | New native-presence and dispatch schemas, validators/registry exports, native-presence projection, core descriptors, event registration, generated Swift/Kotlin artifacts |
-| Documentation | `docs/gateway/protocol/presence.md`, `docs/gateway/protocol/rpc-methods.md`, this report and `progress.md` |
+| Area                 | Files / existing seams                                                                                                                                                                                                                                               |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Policy and execution | `src/config/sessions/private-room-policy.ts`, `types.ts`, `src/agents/private-room-execution.ts`, `src/gateway/private-room-executions.ts`, `server-methods/sessions-execution.ts`, existing agent-turn/command/transcript paths                                     |
+| Files and tools      | `src/agents/sandbox/{private-room,context,runtime-status}.ts`, `agent-tools.ts`, embedded-run tool/bootstrap/skill/compaction paths, `src/gateway/server-methods/sessions-files.ts`                                                                                  |
+| Memory               | `extensions/memory-core/src/{private-room,memory-tool-contract,memory-search-tool-query,session-search-visibility,tools.shared}.ts`, plugin hooks, Active Memory, `src/context-engine/registry.ts`, `packages/memory-host-sdk/src/host/session-transcript-corpus.ts` |
+| Presence             | `src/gateway/native-room-presence.ts`, `native-room-presence-authority.ts`, `server-methods/sessions-presence.ts`, Gateway lifecycle/context/WebSocket/sharing/viewing/typing/subscription wiring                                                                    |
+| Protocol             | New native-presence and dispatch schemas, validators/registry exports, native-presence projection, core descriptors, event registration, generated Swift/Kotlin artifacts                                                                                            |
+| Documentation        | `docs/gateway/protocol/presence.md`, `docs/gateway/protocol/rpc-methods.md`, this report and `progress.md`                                                                                                                                                           |
 
 ## Test source and execution record
 

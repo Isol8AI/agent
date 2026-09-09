@@ -25,12 +25,12 @@ import { resolveSandboxConfigForAgent } from "./config.js";
 import { resolveSandboxDockerUser } from "./docker-user.js";
 import { createSandboxFsBridge } from "./fs-bridge.js";
 import { hashTextSha256 } from "./hash.js";
+import { createPrivateRoomSandbox } from "./private-room.js";
 import { toSandboxProvisioningError } from "./provisioning-error.js";
 import { readRegisteredSandboxRuntimeIds, updateRegistry } from "./registry.js";
 import { resolveSandboxRuntimeStatus } from "./runtime-status.js";
 import { assertSshSandboxSecretOwnerAvailable } from "./secret-owner.js";
 import { resolveSandboxWorkspaceLayoutPaths } from "./shared.js";
-import { createPrivateRoomSandbox } from "./private-room.js";
 import type { SandboxContext, SandboxIsolationSubject, SandboxWorkspaceInfo } from "./types.js";
 import { ensureSandboxWorkspace } from "./workspace.js";
 
@@ -395,10 +395,17 @@ export async function resolveSandboxContext(params: {
   skillsSnapshot?: SkillSnapshot;
   workspaceDir?: string;
 }): Promise<SandboxContext | null> {
-  const policy = resolvePrivateRoomPolicy({ cfg: params.config, sessionKey: params.sessionKey, agentId: params.agentId });
+  const policy = resolvePrivateRoomPolicy({
+    cfg: params.config,
+    sessionKey: params.sessionKey,
+    agentId: params.agentId,
+  });
   if (policy) {
-    return await createPrivateRoomSandbox({ policy, sessionKey: params.sessionKey!,
-      cfg: resolveSandboxConfigForAgent(params.config, params.agentId) });
+    return await createPrivateRoomSandbox({
+      policy,
+      sessionKey: params.sessionKey!,
+      cfg: resolveSandboxConfigForAgent(params.config, params.agentId),
+    });
   }
   const resolved = resolveSandboxSession(params);
   if (!resolved) {
@@ -422,10 +429,18 @@ export async function ensureSandboxWorkspaceForSession(params: {
   sessionKey?: string;
   workspaceDir?: string;
 }): Promise<SandboxWorkspaceInfo | null> {
-  const policy = resolvePrivateRoomPolicy({ cfg: params.config, sessionKey: params.sessionKey, agentId: params.agentId });
+  const policy = resolvePrivateRoomPolicy({
+    cfg: params.config,
+    sessionKey: params.sessionKey,
+    agentId: params.agentId,
+  });
   if (policy) {
     await fs.mkdir(policy.sessionRoot, { recursive: true, mode: 0o700 });
-    return { workspaceDir: policy.sessionRoot, containerWorkdir: policy.sessionRoot, workspaceAccess: "none" };
+    return {
+      workspaceDir: policy.sessionRoot,
+      containerWorkdir: policy.sessionRoot,
+      workspaceAccess: "none",
+    };
   }
   const resolved = resolveSandboxSession(params);
   if (!resolved) {

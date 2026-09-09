@@ -5,14 +5,22 @@ const start = 1_800_000_000_000;
 const room = "agent:main:room";
 const actor = { type: "profile" as const, id: "human-one" };
 const authority: NativePresenceAuthority = { actor, isAuthorized: () => true };
-const online = { heartbeat: true, visibility: "visible" as const, recentInput: "recent" as const, viewingIntent: "viewing" as const };
+const online = {
+  heartbeat: true,
+  visibility: "visible" as const,
+  recentInput: "recent" as const,
+  viewingIntent: "viewing" as const,
+};
 
 describe("native room presence lifecycle", () => {
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
     vi.setSystemTime(start);
   });
-  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
 
   it("keeps subscription and viewing independent and stamps all evidence on the server clock", () => {
     const emit = vi.fn();
@@ -20,12 +28,29 @@ describe("native room presence lifecycle", () => {
     presence.subscribe("background", room, authority);
     expect(presence.snapshot(room).connections).toEqual([]);
     const viewing = presence.update("foreground", room, authority, { viewingIntent: "viewing" });
-    expect(viewing).toMatchObject({ state: "unknown", sequence: 1, visibility: "unknown", recentInput: "unknown", viewingIntentReceivedAtMs: start });
+    expect(viewing).toMatchObject({
+      state: "unknown",
+      sequence: 1,
+      visibility: "unknown",
+      recentInput: "unknown",
+      viewingIntentReceivedAtMs: start,
+    });
     expect(emit.mock.lastCall?.[1]).toEqual(new Set(["background"]));
-    presence.update("foreground", room, authority, { heartbeat: true, visibility: "visible", recentInput: "recent" });
-    expect(presence.snapshot(room).connections[0]).toMatchObject({ state: "online", sequence: 2, expiresAtMs: start + 90_000 });
+    presence.update("foreground", room, authority, {
+      heartbeat: true,
+      visibility: "visible",
+      recentInput: "recent",
+    });
+    expect(presence.snapshot(room).connections[0]).toMatchObject({
+      state: "online",
+      sequence: 2,
+      expiresAtMs: start + 90_000,
+    });
     presence.clearViewing("foreground", new Set());
-    expect(presence.snapshot(room).connections[0]).toMatchObject({ state: "away", viewingIntent: "not-viewing" });
+    expect(presence.snapshot(room).connections[0]).toMatchObject({
+      state: "away",
+      viewingIntent: "not-viewing",
+    });
     expect(emit.mock.lastCall?.[1]).toEqual(new Set(["background"]));
     presence.stop();
   });
@@ -44,7 +69,9 @@ describe("native room presence lifecycle", () => {
     expect(reconnected.sequence).toBe(1);
     presence.disconnect("tab-one", true);
     presence.disconnect("tab-two-reconnected", true);
-    expect(presence.snapshot(room).connections).toEqual([expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start + 1 })]);
+    expect(presence.snapshot(room).connections).toEqual([
+      expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start + 1 }),
+    ]);
     presence.stop();
   });
 
@@ -52,12 +79,18 @@ describe("native room presence lifecycle", () => {
     const presence = createNativeRoomPresence({ emit: vi.fn() });
     presence.update("one", room, authority, online);
     vi.advanceTimersByTime(89_000);
-    expect(presence.update("one", room, authority, { typing: true })).toMatchObject({ state: "typing", expiresAtMs: start + 90_000 });
+    expect(presence.update("one", room, authority, { typing: true })).toMatchObject({
+      state: "typing",
+      expiresAtMs: start + 90_000,
+    });
     presence.disconnect("one", false);
     vi.advanceTimersByTime(999);
     expect(presence.snapshot(room).connections[0].state).toBe("typing");
     vi.advanceTimersByTime(1);
-    expect(presence.snapshot(room).connections[0]).toMatchObject({ state: "offline", authoritativeLastSeenAtMs: start + 90_000 });
+    expect(presence.snapshot(room).connections[0]).toMatchObject({
+      state: "offline",
+      authoritativeLastSeenAtMs: start + 90_000,
+    });
     presence.stop();
   });
 
@@ -68,15 +101,24 @@ describe("native room presence lifecycle", () => {
     vi.advanceTimersByTime(999);
     expect(presence.update("one", room, authority, { typing: true })).toBeUndefined();
     vi.advanceTimersByTime(1);
-    expect(presence.update("one", room, authority, { typing: true })).toMatchObject({ state: "typing", expiresAtMs: start + 3_500 });
+    expect(presence.update("one", room, authority, { typing: true })).toMatchObject({
+      state: "typing",
+      expiresAtMs: start + 3_500,
+    });
     vi.advanceTimersByTime(2_500);
     expect(presence.snapshot(room).connections[0].state).toBe("online");
     vi.advanceTimersByTime(26_500);
     for (let heartbeat = 1; heartbeat <= 10; heartbeat += 1) {
       presence.update("one", room, authority, { heartbeat: true });
-      if (heartbeat < 10) { vi.advanceTimersByTime(30_000); }
+      if (heartbeat < 10) {
+        vi.advanceTimersByTime(30_000);
+      }
     }
-    expect(presence.snapshot(room).connections[0]).toMatchObject({ state: "away", recentInput: "stale", recentInputObservedAtMs: start });
+    expect(presence.snapshot(room).connections[0]).toMatchObject({
+      state: "away",
+      recentInput: "stale",
+      recentInputObservedAtMs: start,
+    });
     presence.stop();
   });
 
@@ -93,7 +135,15 @@ describe("native room presence lifecycle", () => {
 
   it("revokes every actor lease and its subscription immediately without converting failed ACL reads into offline", () => {
     let access: "allowed" | "denied" | "failed" = "allowed";
-    const revocable = { actor, isAuthorized: () => { if (access === "failed") { throw new Error("storage unavailable"); } return access === "allowed"; } };
+    const revocable = {
+      actor,
+      isAuthorized: () => {
+        if (access === "failed") {
+          throw new Error("storage unavailable");
+        }
+        return access === "allowed";
+      },
+    };
     const emit = vi.fn();
     const presence = createNativeRoomPresence({ emit });
     presence.subscribe("one", room, revocable);
@@ -101,11 +151,21 @@ describe("native room presence lifecycle", () => {
     presence.update("two", room, revocable, online);
     access = "failed";
     expect(presence.snapshot(room)).toMatchObject({ inventoryStatus: "failed", connections: [] });
-    presence.update("other", room, { actor: { type: "agent", id: "runtime-agent" }, isAuthorized: () => true }, online);
-    expect(presence.snapshot(room)).toMatchObject({ inventoryStatus: "incomplete", connections: [expect.objectContaining({ actor: { type: "agent", id: "runtime-agent" } })] });
+    presence.update(
+      "other",
+      room,
+      { actor: { type: "agent", id: "runtime-agent" }, isAuthorized: () => true },
+      online,
+    );
+    expect(presence.snapshot(room)).toMatchObject({
+      inventoryStatus: "incomplete",
+      connections: [expect.objectContaining({ actor: { type: "agent", id: "runtime-agent" } })],
+    });
     access = "denied";
     presence.revalidate();
-    expect(presence.snapshot(room).connections.filter((event) => event.actor.type === "profile")).toEqual([expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start })]);
+    expect(
+      presence.snapshot(room).connections.filter((event) => event.actor.type === "profile"),
+    ).toEqual([expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start })]);
     expect(emit.mock.lastCall?.[1]).toEqual(new Set());
     presence.stop();
   });

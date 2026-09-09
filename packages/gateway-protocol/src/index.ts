@@ -17,8 +17,6 @@ export * from "./schema/ui-command.js";
 export * from "./schema/board.js";
 export * from "./schema/canvas.js";
 export * from "./schema/progress-card.js";
-export * from "./schema/native-presence.js";
-export * from "./schema/sessions-execution.js";
 export * from "./native-presence-projection.js";
 export * from "./schema/transcripts.js";
 export {

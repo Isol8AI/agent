@@ -2,13 +2,13 @@
 
 ## Task 3 preflight interface scan
 
-| Producer / consumer | Interface | Ruling |
-|---|---|---|
-| Task 1 -> Task 3 | Restricted visibility, typed membership, atomic room policy, revocation | Consume the canonical ACL only; participants, profile presentation, and operator write do not grant membership. |
-| Task 2 -> Task 3 | Authenticated non-inference append and run-derived agent result identity | Execution dispatch is a separate state machine; it may reference a committed input message but cannot rewrite or roll it back. |
-| Task 3 isolation -> Task 3 files/memory/tools | Exact session-owned private execution policy | One immutable room policy and exact session root must feed every downstream capability check; no per-profile or global-workspace fallback. |
-| Task 3 dispatch -> Task 3 revocation/result | Authenticated root execution id, hop count, live membership | Reject hop count greater than three before work; recheck membership and exact session instance for dispatch and result append; abort safely on revocation. |
-| Task 3 presence producer -> Task 5/UI consumers | Native v1 server-timestamped leases, snapshots, events, completeness | Preserve complete/incomplete/failed inventory; viewing intent and subscription stay independent; no message-recency or client-wall-clock inference. |
+| Producer / consumer                             | Interface                                                                | Ruling                                                                                                                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task 1 -> Task 3                                | Restricted visibility, typed membership, atomic room policy, revocation  | Consume the canonical ACL only; participants, profile presentation, and operator write do not grant membership.                                            |
+| Task 2 -> Task 3                                | Authenticated non-inference append and run-derived agent result identity | Execution dispatch is a separate state machine; it may reference a committed input message but cannot rewrite or roll it back.                             |
+| Task 3 isolation -> Task 3 files/memory/tools   | Exact session-owned private execution policy                             | One immutable room policy and exact session root must feed every downstream capability check; no per-profile or global-workspace fallback.                 |
+| Task 3 dispatch -> Task 3 revocation/result     | Authenticated root execution id, hop count, live membership              | Reject hop count greater than three before work; recheck membership and exact session instance for dispatch and result append; abort safely on revocation. |
+| Task 3 presence producer -> Task 5/UI consumers | Native v1 server-timestamped leases, snapshots, events, completeness     | Preserve complete/incomplete/failed inventory; viewing intent and subscription stay independent; no message-recency or client-wall-clock inference.        |
 
 Ruling: implement the plan's full trust-boundary and timing contract, but reuse existing sandbox, session-policy, subscription, clock, and participant primitives before adding state. No second transcript, room container, or global mesh.
 Ruling: the task may use scoped commits for isolation/dispatch and presence inside one independently reviewable stacked PR; this does not combine fork PR boundaries.

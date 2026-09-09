@@ -1,5 +1,3 @@
-// Gateway methods expose session files and workspace browsing.
-import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import { asOptionalObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
@@ -12,6 +10,8 @@ import {
   validateSessionsFilesListParams,
   validateSessionsFilesSetParams,
 } from "../../../packages/gateway-protocol/src/index.js";
+// Gateway methods expose session files and workspace browsing.
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
@@ -264,8 +264,13 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
     if (loaded.entry.repositoryWorkspaceId) {
       throw new Error("Private room policy cannot expose a repository workspace");
     }
-    return { ...loaded, agentId, root: privatePolicy.sessionRoot,
-      fileRoot: privatePolicy.sessionRoot, diffCwd: privatePolicy.sessionRoot };
+    return {
+      ...loaded,
+      agentId,
+      root: privatePolicy.sessionRoot,
+      fileRoot: privatePolicy.sessionRoot,
+      diffCwd: privatePolicy.sessionRoot,
+    };
   }
   if (loaded.entry.repositoryWorkspaceId) {
     return { ...loaded, agentId, root: undefined, fileRoot: undefined, diffCwd: undefined };

@@ -1,4 +1,3 @@
-import { sql } from "kysely";
 import { executeSqliteQuerySync } from "../../infra/kysely-sync.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
@@ -41,10 +40,11 @@ export function listTranscriptInstancesFromDatabase(params: {
       "spawned_by",
       "chat_type",
     ])
-    .select(
-      readSqliteTableColumns(params.database.db, "session_windows")?.has("memory_restricted")
-        ? "memory_restricted"
-        : sql<number | null>`NULL`.as("memory_restricted"),
+    .select((expression) =>
+      (readSqliteTableColumns(params.database.db, "session_windows")?.has("memory_restricted")
+        ? expression.ref("memory_restricted")
+        : expression.val<number | null>(null)
+      ).as("memory_restricted"),
     );
   if (!params.options.includeAllWindows) {
     query = query.where("transcript_updated_at", "is not", null);
@@ -133,10 +133,11 @@ export function listSessionTranscriptArchivesReadOnly(
         "session_key as sessionKey",
         "created_at as createdAt",
       ])
-      .select(
-        readSqliteTableColumns(db, "session_transcript_archives")?.has("memory_restricted")
-          ? sql<number | null>`memory_restricted`.as("memoryRestricted")
-          : sql<number | null>`NULL`.as("memoryRestricted"),
+      .select((expression) =>
+        (readSqliteTableColumns(db, "session_transcript_archives")?.has("memory_restricted")
+          ? expression.ref("memory_restricted")
+          : expression.val<number | null>(null)
+        ).as("memoryRestricted"),
       )
       .orderBy("created_at")
       .orderBy("session_id");

@@ -25,7 +25,11 @@ function presenceHandler(
     }
     const presence = context.nativeRoomPresence;
     if (!presence || !client?.connId || !context.isConnectionActive?.(client.connId)) {
-      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "native room presence unavailable"));
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, "native room presence unavailable"),
+      );
       return;
     }
     try {

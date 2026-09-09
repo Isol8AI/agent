@@ -22,8 +22,8 @@ import { chatHandlers } from "./chat.js";
 import { emitSessionsChanged } from "./session-change-event.js";
 import { isFreshChatSendStarted } from "./session-create-initial-turn.js";
 import { sessionCreateHandlers } from "./sessions-create.js";
-import { appendSessionMessage } from "./sessions-message-append.js";
 import { dispatchSessionExecution } from "./sessions-execution.js";
+import { appendSessionMessage } from "./sessions-message-append.js";
 import { isAgentMainSessionKey, requireSessionKey } from "./sessions-shared.js";
 import type {
   GatewayClient,

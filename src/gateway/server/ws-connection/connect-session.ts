@@ -16,10 +16,7 @@ import { resolveLocalNodeId } from "../../../node-host/local-id.js";
 import { roleScopesAllow } from "../../../shared/operator-scope-compat.js";
 import { recordRemoteNodeInfo, refreshRemoteNodeBins } from "../../../skills/runtime/remote.js";
 import { classifyTailscaleLogin } from "../../../state/user-profiles-tailscale-login.js";
-import {
-  adoptTailscaleProfileAvatar,
-  getUserProfileListItem,
-} from "../../../state/user-profiles.js";
+import { adoptTailscaleProfileAvatar } from "../../../state/user-profiles.js";
 import {
   isBrowserCopilotClient,
   isEphemeralGatewayClient,
@@ -58,8 +55,8 @@ import {
 import { sendGatewayHello } from "./connect-hello.js";
 import { prepareGatewayNodeConnect } from "./connect-node-session.js";
 import {
-  resolveAuthenticatedProfile,
   resolveGatewayConnectUserProfile,
+  resolveTrustedBrokerProfile,
 } from "./connect-user-profile.js";
 import { resolveControlUiBuildMismatch } from "./control-ui-build-admission.js";
 import type {
@@ -208,43 +205,31 @@ export async function attachAuthenticatedGatewayConnect(
     !trustedBrokerProfileId &&
     shouldUseGatewayOwnerProfile({ role, authenticatedUserId, authMethod, rolesConfigured });
   let authenticatedUserProfile: GatewayWsClient["authenticatedUserProfile"];
-  if (trustedBrokerProfileId) {
-    try {
-      const profile = getUserProfileListItem(trustedBrokerProfileId);
-      if (profile.id !== trustedBrokerProfileId) {
-        throw new Error("trusted broker profile mapping is not canonical");
-      }
-      authenticatedUserProfile = resolveAuthenticatedProfile(profile.id, profile.updatedAt);
-    } catch (error) {
-      logWsControl.warn(
-        `trusted broker profile resolution failed conn=${connId}: ${formatForLog(error)}`,
-      );
-      await rejectUnavailableProfileConnect(context, error);
-      return;
-    }
-  }
   if (
-    !authenticatedUserProfile &&
-    (ownerProfileExpected ||
-      (authenticatedUserId && (!resolveAuthenticatedGitHubIdentity || rolesConfigured)))
+    trustedBrokerProfileId ||
+    ownerProfileExpected ||
+    (authenticatedUserId && (!resolveAuthenticatedGitHubIdentity || rolesConfigured))
   ) {
     try {
       // The live profile callback refreshes edits and detached provider-avatar adoption.
-      authenticatedUserProfile = await resolveGatewayConnectUserProfile({
-        ownerProfileExpected,
-        authenticatedUserId,
-        authResult,
-        resolveAuthenticatedGitHubIdentity,
-      });
+      authenticatedUserProfile = trustedBrokerProfileId
+        ? resolveTrustedBrokerProfile(trustedBrokerProfileId)
+        : await resolveGatewayConnectUserProfile({
+            ownerProfileExpected,
+            authenticatedUserId,
+            authResult,
+            resolveAuthenticatedGitHubIdentity,
+          });
     } catch (error) {
       logWsControl.warn(
         `user profile resolution failed conn=${connId} user=${formatForLog(authenticatedUserId)}: ${formatForLog(error)}`,
       );
       if (
-        !ownerProfileExpected &&
-        rolesConfigured &&
-        role === "operator" &&
-        !sharedSecretOperatorOwner
+        trustedBrokerProfileId ||
+        (!ownerProfileExpected &&
+          rolesConfigured &&
+          role === "operator" &&
+          !sharedSecretOperatorOwner)
       ) {
         await rejectUnavailableProfileConnect(context, error);
         return;

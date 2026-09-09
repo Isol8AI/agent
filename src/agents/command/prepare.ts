@@ -45,7 +45,10 @@ import { AGENT_LANE_SUBAGENT } from "../lanes.js";
 import type { ModelManifestNormalizationContext } from "../model-ref-shared.js";
 import { buildConfiguredModelCatalog, resolveConfiguredModelRef } from "../model-selection.js";
 import type { PreparedModelRuntimePluginGeneration } from "../prepared-model-runtime.types.js";
-import { assertPrivateRoomExecutionTarget, getPrivateRoomExecution } from "../private-room-execution.js";
+import {
+  assertPrivateRoomExecutionTarget,
+  getPrivateRoomExecution,
+} from "../private-room-execution.js";
 import { normalizeSpawnedRunMetadata } from "../spawned-context.js";
 import { resolveEffectiveAgentRuntime } from "../thinking-runtime.js";
 import { resolveAgentTimeoutMs } from "../timeout.js";

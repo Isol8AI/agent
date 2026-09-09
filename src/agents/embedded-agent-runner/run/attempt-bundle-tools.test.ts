@@ -74,9 +74,10 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
         assertCurrent: () => {},
         close: () => {},
       },
-      () => prepareEmbeddedAttemptBundleTools(
-        input as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0],
-      ),
+      () =>
+        prepareEmbeddedAttemptBundleTools(
+          input as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0],
+        ),
     );
     expect(result.bundleMcpRuntime).toBeUndefined();
     expect(result.bundleLspRuntime).toBeUndefined();

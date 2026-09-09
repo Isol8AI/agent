@@ -1,15 +1,13 @@
 import * as sessionsCreate from "./sessions-create.js";
 import * as viewerPresence from "./sessions-viewer-presence.js";
-import * as nativePresence from "./native-presence.js";
-import * as execution from "./sessions-execution.js";
 import * as sessions from "./sessions.js";
 
 export const SessionLifecycleProtocolSchemas = {
-  SessionExecutionDispatchParams: execution.SessionExecutionDispatchParamsSchema,
-  NativePresenceEvent: nativePresence.NativePresenceEventSchema,
-  NativePresenceSnapshot: nativePresence.NativePresenceSnapshotSchema,
-  SessionsPresenceParams: nativePresence.SessionsPresenceParamsSchema,
-  SessionsPresenceHeartbeatParams: nativePresence.SessionsPresenceHeartbeatParamsSchema,
+  SessionExecutionDispatchParams: sessions.SessionExecutionDispatchParamsSchema,
+  NativePresenceEvent: viewerPresence.NativePresenceEventSchema,
+  NativePresenceSnapshot: viewerPresence.NativePresenceSnapshotSchema,
+  SessionsPresenceParams: viewerPresence.SessionsPresenceParamsSchema,
+  SessionsPresenceHeartbeatParams: viewerPresence.SessionsPresenceHeartbeatParamsSchema,
   SessionsGoalUpdateParams: sessions.SessionsGoalUpdateParamsSchema,
   SessionsGoalClearParams: sessions.SessionsGoalClearParamsSchema,
   SessionsGoalMutationResult: sessions.SessionsGoalMutationResultSchema,

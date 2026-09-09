@@ -8,7 +8,7 @@ import {
   type NativePresenceActor,
   type NativePresenceEvent,
   type NativePresenceSnapshot,
-} from "../../packages/gateway-protocol/src/schema/native-presence.js";
+} from "../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
 import { SESSION_VIEWER_PRESENCE_MAX_KEYS } from "../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
 
 export type NativePresenceAuthority = {
@@ -89,7 +89,8 @@ export function createNativeRoomPresence(params: {
     ) {
       event.recentInput = "stale";
     }
-    const typing = lease.typingAtMs !== undefined && at < lease.typingAtMs + TYPING_EXPIRES_AFTER_MS;
+    const typing =
+      lease.typingAtMs !== undefined && at < lease.typingAtMs + TYPING_EXPIRES_AFTER_MS;
     event.state = typing
       ? "typing"
       : event.visibility === "hidden" ||
@@ -185,18 +186,32 @@ export function createNativeRoomPresence(params: {
         if (lease.typingAtMs !== undefined && lease.typingAtMs + TYPING_EXPIRES_AFTER_MS > at) {
           next = Math.min(next, lease.typingAtMs + TYPING_EXPIRES_AFTER_MS);
         }
-        if (lease.event.recentInput === "recent" && lease.event.recentInputObservedAtMs !== undefined) {
-          next = Math.min(next, lease.event.recentInputObservedAtMs + PRESENCE_AVAILABLE_ACTIVITY_MS);
+        if (
+          lease.event.recentInput === "recent" &&
+          lease.event.recentInputObservedAtMs !== undefined
+        ) {
+          next = Math.min(
+            next,
+            lease.event.recentInputObservedAtMs + PRESENCE_AVAILABLE_ACTIVITY_MS,
+          );
         }
       }
     }
-    timer = setTimeout(() => {
-      reconcile(now());
-      schedule();
-    }, Math.max(1, next - at));
+    timer = setTimeout(
+      () => {
+        reconcile(now());
+        schedule();
+      },
+      Math.max(1, next - at),
+    );
     timer.unref?.();
   };
-  const admit = (transportId: string, room: string, authority: NativePresenceAuthority, at: number) => {
+  const admit = (
+    transportId: string,
+    room: string,
+    authority: NativePresenceAuthority,
+    at: number,
+  ) => {
     if (stopped || !authorized(authority)) {
       throw new Error("native presence room authorization unavailable");
     }
@@ -350,7 +365,8 @@ export function createNativeRoomPresence(params: {
       }
       const rooms = subscriptions.get(transportId) ?? new Map<string, NativePresenceAuthority>();
       if (
-        (!subscriptions.has(transportId) && subscriptions.size >= NATIVE_PRESENCE_MAX_CONNECTIONS) ||
+        (!subscriptions.has(transportId) &&
+          subscriptions.size >= NATIVE_PRESENCE_MAX_CONNECTIONS) ||
         (!rooms.has(room) && rooms.size >= SESSION_VIEWER_PRESENCE_MAX_KEYS)
       ) {
         throw new Error("native presence subscription capacity reached");

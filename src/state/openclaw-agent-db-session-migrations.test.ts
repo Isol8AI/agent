@@ -36,9 +36,11 @@ describe("agent DB conversation migration", () => {
     ensureSessionMemoryPrivacyColumns(database);
     ensureSessionMemoryPrivacyColumns(database);
     expect(
-      database.prepare(
-        "SELECT session_id, memory_restricted FROM session_transcript_archives ORDER BY session_id",
-      ).all(),
+      database
+        .prepare(
+          "SELECT session_id, memory_restricted FROM session_transcript_archives ORDER BY session_id",
+        )
+        .all(),
     ).toEqual([
       { session_id: "deleted", memory_restricted: null },
       { session_id: "old", memory_restricted: null },

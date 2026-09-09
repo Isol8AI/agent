@@ -1,7 +1,7 @@
 import { executeSqliteQueryTakeFirstSync, getNodeSqliteKysely } from "../../infra/kysely-sync.js";
 import type { DB as OpenClawAgentKyselyDatabase } from "../../state/openclaw-agent-db.generated.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
-import type { SessionEntry } from "./types.js";
+import type { InternalSessionEntry as SessionEntry } from "./types.js";
 
 type SessionProvenanceRow = {
   acp_owned: number;
@@ -18,7 +18,8 @@ export function bindSessionEntryProvenance(entry: SessionEntry): SessionProvenan
   const persistedHookSource = hookSource === "email" ? "webhook" : hookSource;
   return {
     session_entry_provenance: 1,
-    memory_restricted: entry.visibility === "restricted" || entry.privateRoomExecutionPolicy ? 1 : 0,
+    memory_restricted:
+      entry.visibility === "restricted" || entry.privateRoomExecutionPolicy ? 1 : 0,
     acp_owned: entry.acp ? 1 : 0,
     plugin_owner_id:
       typeof entry.pluginOwnerId === "string" && entry.pluginOwnerId.trim()

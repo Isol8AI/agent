@@ -6,7 +6,7 @@ import { ErrorShapeSchema } from "./frames.js";
 import { HumanMentionsSchema } from "./human-mentions.js";
 import { ChatAttachmentsSchema } from "./logs-chat.js";
 import { PluginJsonValueSchema } from "./plugins.js";
-import { NonEmptyString, SessionLabelString } from "./primitives.js";
+import { ChatSendSessionKeyString, NonEmptyString, SessionLabelString } from "./primitives.js";
 import { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema } from "./sessions-create.js";
 import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sessions-recover.js";
 import { SessionOwnerSchema } from "./sessions-row.js";
@@ -869,6 +869,15 @@ export type SessionsGroupsDeleteParams = Static<typeof SessionsGroupsDeleteParam
 export type SessionsGroupsMutationResult = Static<typeof SessionsGroupsMutationResultSchema>;
 export type SessionsCompactParams = Static<typeof SessionsCompactParamsSchema>;
 export type SessionsUsageParams = Static<typeof SessionsUsageParamsSchema>;
+
+export const SessionExecutionDispatchParamsSchema = closedObject({
+  sessionKey: ChatSendSessionKeyString,
+  expectedSessionId: NonEmptyString,
+  inputMessageId: NonEmptyString,
+  idempotencyKey: NonEmptyString,
+  hopCount: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
+});
+export type SessionExecutionDispatchParams = Static<typeof SessionExecutionDispatchParamsSchema>;
 export type SessionFileContentEncoding = Static<typeof SessionFileContentEncodingSchema>;
 export type SessionFileKind = Static<typeof SessionFileKindSchema>;
 export type SessionFilePreviewKind = Static<typeof SessionFilePreviewKindSchema>;

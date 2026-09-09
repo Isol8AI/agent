@@ -1,11 +1,11 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import {
   ErrorCodes,
   errorShape,
   type ErrorShape,
 } from "../../packages/gateway-protocol/src/index.js";
 import { AgentSelectionRequiredError } from "../agents/agent-scope.js";
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import type { SessionEntry } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isIncognitoSessionKey } from "../routing/session-key.js";
@@ -110,7 +110,11 @@ function authorizeRestrictedPolicyPlaceholder(
   }
   const policy = target.entry.privateRoomExecutionPolicy;
   const execution = getPrivateRoomExecution();
-  if (method === "agent" && execution?.sessionKey === target.canonicalKey && execution.sessionId === target.entry.sessionId) {
+  if (
+    method === "agent" &&
+    execution?.sessionKey === target.canonicalKey &&
+    execution.sessionId === target.entry.sessionId
+  ) {
     execution.assertCurrent();
     return null;
   }

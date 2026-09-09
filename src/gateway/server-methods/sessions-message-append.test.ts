@@ -5,6 +5,10 @@ import {
   type SessionMemberIdentity,
   type SessionMessageAppendResult,
 } from "../../../packages/gateway-protocol/src/index.js";
+import {
+  bindPrivateRoomRun,
+  withPrivateRoomExecution,
+} from "../../agents/private-room-execution.js";
 import { readTranscriptSenderIdentity } from "../../chat/sender-identity.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import {
@@ -39,7 +43,6 @@ import {
   projectTranscriptEntryMessage,
 } from "../session-transcript-message.js";
 import { appendSessionMessage } from "./sessions-message-append.js";
-import { bindPrivateRoomRun, withPrivateRoomExecution } from "../../agents/private-room-execution.js";
 import {
   identifiedClient,
   sessionSharingTestContext,
@@ -120,9 +123,20 @@ function agentClient(): GatewayClient {
   const operationalRunInstance = { instanceId: "execution-1", runId: "run-1" };
   registerAgentRunContext("run-1", { agentId: "helper", sessionKey: scope.sessionKey });
   const delegatedAuthority = claimAgentRunDelegatedAuthority(operationalRunInstance);
-  withPrivateRoomExecution({ agentId: "helper", rootExecutionId: "root-execution-1", runId: "run-1", hopCount: 0,
-    sessionKey: scope.sessionKey, sessionId: scope.sessionId, inputMessageId: "input-1",
-    assertCurrent: () => {}, close: () => {} }, () => bindPrivateRoomRun(operationalRunInstance));
+  withPrivateRoomExecution(
+    {
+      agentId: "helper",
+      rootExecutionId: "root-execution-1",
+      runId: "run-1",
+      hopCount: 0,
+      sessionKey: scope.sessionKey,
+      sessionId: scope.sessionId,
+      inputMessageId: "input-1",
+      assertCurrent: () => {},
+      close: () => {},
+    },
+    () => bindPrivateRoomRun(operationalRunInstance),
+  );
   return {
     ...soloClient(),
     internal: {

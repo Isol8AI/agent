@@ -481,7 +481,10 @@ export function attachGatewayWsConnectionHandler(params: AttachGatewayWsConnecti
         const context = buildRequestContext();
         cleanupTalkConnection(connId, logGateway);
         context.unsubscribeAllSessionEvents(connId);
-        context.nativeRoomPresence?.disconnect(connId, code === 1000 || code === 1001 || Boolean(client?.invalidated));
+        context.nativeRoomPresence?.disconnect(
+          connId,
+          code === 1000 || code === 1001 || Boolean(client?.invalidated),
+        );
         // Detach or kill owned PTY shells; detached sessions remain reattachable until reaped.
         context.terminalSessions?.handleDisconnect(connId);
         let currentDisconnectedNodeId: string | null = null;

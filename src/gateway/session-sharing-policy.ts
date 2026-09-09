@@ -1,4 +1,3 @@
-import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import {
   ErrorCodes,
   errorShape,
@@ -8,6 +7,7 @@ import {
   type SessionVisibility,
 } from "../../packages/gateway-protocol/src/index.js";
 import { GATEWAY_OWNER_PROFILE_ID } from "../../packages/gateway-protocol/src/schema/users.js";
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import {
   isSessionMember,
   type InternalSessionEntry,

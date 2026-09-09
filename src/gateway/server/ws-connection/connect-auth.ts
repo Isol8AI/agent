@@ -458,9 +458,10 @@ async function authenticateGatewayConnectCore(
       assertedTrustedBrokerProfileId === configuredTrustedBrokerProfileId;
     if (!validTrustedBrokerAssertion) {
       const message = "trusted broker profile assertion rejected";
-      markHandshakeFailure("trusted-broker-profile-rejected", {
-        ...(device?.id ? { deviceId: device.id } : {}),
-      });
+      markHandshakeFailure(
+        "trusted-broker-profile-rejected",
+        device?.id ? { deviceId: device.id } : {},
+      );
       sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, message);
       close(1008, message);
       return undefined;

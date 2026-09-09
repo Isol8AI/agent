@@ -1,12 +1,12 @@
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { getMemoryCapabilityRegistration } from "openclaw/plugin-sdk/memory-host-core";
 import {
   normalizePluginsConfig,
   resolveLivePluginConfigObject,
 } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import {
   applyCliRuntimeRecallTimeoutDefault,
   hasDeprecatedModelFallbackPolicy,
@@ -217,7 +217,8 @@ export default definePluginEntry({
         const liveConfig = readCurrentConfig();
         const roomAgentId = resolveStatusUpdateAgentId(ctx);
         if (
-          ctx.sessionKey && roomAgentId &&
+          ctx.sessionKey &&
+          roomAgentId &&
           getSessionEntry({
             agentId: roomAgentId,
             sessionKey: ctx.sessionKey,

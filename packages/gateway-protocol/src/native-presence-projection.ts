@@ -8,7 +8,7 @@ import {
   TYPING_EXPIRES_AFTER_MS,
   type NativePresenceEvent,
   type NativePresenceSnapshot,
-} from "./schema/native-presence.js";
+} from "./schema/sessions-viewer-presence.js";
 
 function epochMs(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 1_000_000_000_000;
@@ -25,7 +25,7 @@ export function normalizeNativePresenceEvent(
   if (!epochMs(serverNowAtMs) || !input || typeof input !== "object" || Array.isArray(input)) {
     return undefined;
   }
-  const event = { ...input } as Record<string, unknown>;
+  const event: Record<string, unknown> = { ...input };
   if (
     !observed(event.connectionStartedAtMs, serverNowAtMs) ||
     !observed(event.serverReceivedAtMs, serverNowAtMs) ||
@@ -101,17 +101,23 @@ export function reconcileNativePresenceSnapshot(
       validationFailureCode: previous?.validationFailureCode,
     };
   }
-  const retained = new Map((previous?.connections ?? []).map((event) => [event.connectionId, event]));
+  const retained = new Map(
+    (previous?.connections ?? []).map((event) => [event.connectionId, event]),
+  );
   const included = new Set<string>();
   let invalid = false;
   for (const input of snapshot.connections) {
     const event = normalizeNativePresenceEvent(input, snapshot.serverNowAtMs);
-    const invalidObservation = event && ([
-      "visibilityObservedAtMs",
-      "recentInputObservedAtMs",
-      "viewingIntentReceivedAtMs",
-      "authoritativeLastSeenAtMs",
-    ] as const).some((field) => input[field] !== undefined && event[field] === undefined);
+    const invalidObservation =
+      event &&
+      (
+        [
+          "visibilityObservedAtMs",
+          "recentInputObservedAtMs",
+          "viewingIntentReceivedAtMs",
+          "authoritativeLastSeenAtMs",
+        ] as const
+      ).some((field) => input[field] !== undefined && event[field] === undefined);
     if (!event || event.roomKey !== snapshot.roomKey || invalidObservation) {
       invalid = true;
       const prior = retained.get(input?.connectionId);
@@ -211,8 +217,7 @@ export function aggregateNativePresence(
   return inventory.inventoryStatus === "complete" &&
     inventory.evidenceStatus !== "invalid" &&
     events.every(
-      (event) =>
-        event.state === "offline" || (event.state !== "typing" && event.expiresAtMs <= at),
+      (event) => event.state === "offline" || (event.state !== "typing" && event.expiresAtMs <= at),
     )
     ? "offline"
     : "unknown";

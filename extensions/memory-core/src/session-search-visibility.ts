@@ -1,5 +1,4 @@
 import { resolveSessionAgentIdStrict } from "openclaw/plugin-sdk/agent-scope-runtime";
-import { isRestrictedMemorySession } from "./private-room.js";
 import {
   buildSessionEntry,
   loadArchivedSessions,
@@ -26,6 +25,7 @@ import {
   normalizeOptionalLowercaseString as normalizeAgentIdForCompare,
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRestrictedMemorySession } from "./private-room.js";
 import {
   readSessionArchiveReasonFromHitPath,
   readSessionResetRecallCutoffMetadata,
@@ -173,7 +173,13 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
   /** Trusted control-plane calls may authorize only hits already scoped to this agent. */
   trustedAgentScope?: boolean;
 }): Promise<MemorySearchResult[]> {
-  if (isRestrictedMemorySession({ cfg: params.cfg, agentId: params.agentId, sessionKey: params.requesterSessionKey })) {
+  if (
+    isRestrictedMemorySession({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      sessionKey: params.requesterSessionKey,
+    })
+  ) {
     return [];
   }
   // Session visibility owns transcript hits only. Loading the catalog here for

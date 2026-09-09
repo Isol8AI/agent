@@ -363,19 +363,17 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     readConsistency: "latest",
     storePath,
   });
-  const privateSessionIds = new Set(
-    [
-      ...sessionEntries
-        .filter(({ entry }) => entry.visibility === "restricted")
-        .map(({ entry }) => entry.sessionId),
-      ...retainedInstances
-        .filter(
-          ({ entry, memoryRestricted }) =>
-            entry.visibility === "restricted" || memoryRestricted !== false,
-        )
-        .map(({ sessionId }) => sessionId),
-    ],
-  );
+  const privateSessionIds = new Set([
+    ...sessionEntries
+      .filter(({ entry }) => entry.visibility === "restricted")
+      .map(({ entry }) => entry.sessionId),
+    ...retainedInstances
+      .filter(
+        ({ entry, memoryRestricted }) =>
+          entry.visibility === "restricted" || memoryRestricted !== false,
+      )
+      .map(({ sessionId }) => sessionId),
+  ]);
   const artifactPaths: string[] = [];
   const scannedArtifactPaths = new Set<string>();
   for (const artifactDir of artifactDirsByPath.values()) {

@@ -23,7 +23,6 @@ import type { RestartRecoveryCandidate } from "./chat-abort.js";
 import { createControlUiSessionPullRequestSubscriptions } from "./control-ui-session-pr-subscriptions.js";
 import { retireDeviceTokenClients } from "./device-token-client-lifecycle.js";
 import { STARTUP_UNAVAILABLE_GATEWAY_METHODS } from "./methods/core-descriptors.js";
-import { createNativeRoomPresence } from "./native-room-presence.js";
 import { disposeNodeConnectionNotifications } from "./node-connection-notifications.js";
 import { clearNodeWakeState } from "./node-wake-state.js";
 import { createLazyGatewayCronState } from "./server-cron-lazy.js";
@@ -47,7 +46,6 @@ import {
   refreshGatewayHealthSnapshot,
 } from "./server/health-state.js";
 import { broadcastPresenceSnapshot } from "./server/presence-events.js";
-import { createSessionViewerPresenceDeclarations } from "./session-viewer-presence.js";
 
 type GatewayRuntimePreparation = Awaited<ReturnType<typeof prepareGatewayKernelState>>;
 type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
@@ -231,6 +229,11 @@ export async function prepareGatewayLifecycle(params: {
       resolveGatewayContext: runtime.resolvePluginGatewayContext,
     }),
     gatewayMethods: listActiveGatewayMethods(pluginRuntime.baseGatewayMethods),
+    clients,
+    broadcast,
+    incrementPresenceVersion,
+    getHealthVersion,
+    broadcastToConnIds,
   });
   const runtimeState = runtimeStateRef.current;
   const pluginRuntimeGeneration = createGatewayPluginRuntimeGeneration({
@@ -344,20 +347,6 @@ export async function prepareGatewayLifecycle(params: {
     broadcastToConnIds,
     isConnectionActive,
     canReadSession: runtime.canReadSession,
-  });
-  runtimeState.sessionViewerPresence = createSessionViewerPresenceDeclarations({
-    clients,
-    broadcast,
-    incrementPresenceVersion,
-    getHealthVersion,
-  });
-  runtimeState.nativeRoomPresence = createNativeRoomPresence({
-    emit: (event, recipients) =>
-      broadcastToConnIds("session.presence", event, recipients, {
-        dropIfSlow: true,
-        sessionKeys: [event.roomKey],
-        sessionSubscriptionVerified: true,
-      }),
   });
   deps.cron = runtimeState.cronState.cron;
   const pluginHostServices = {

@@ -14,10 +14,11 @@ export async function createPrivateRoomSandbox(params: {
   const { policy } = params;
   const execution = getPrivateRoomExecution();
   execution?.assertCurrent();
-  if (execution && (
-    execution.sessionId !== policy.isolationSubject.sessionId ||
-    execution.sessionKey !== params.sessionKey
-  )) {
+  if (
+    execution &&
+    (execution.sessionId !== policy.isolationSubject.sessionId ||
+      execution.sessionKey !== params.sessionKey)
+  ) {
     throw new Error("Private room sandbox requires the exact execution identity");
   }
   await fs.mkdir(policy.sessionRoot, { recursive: true, mode: 0o700 });

@@ -170,16 +170,6 @@ describe("method scope resolution", () => {
     expect(resolveLeastPrivilegeOperatorScopesForMethod(method)).toEqual(expected);
   });
 
-  it("denies users.ensureProfile without authenticated admin scope", () => {
-    expect(authorizeOperatorScopesForMethod("users.ensureProfile", ["operator.write"])).toEqual({
-      allowed: false,
-      missingScope: "operator.admin",
-    });
-    expect(authorizeOperatorScopesForMethod("users.ensureProfile", ["operator.admin"])).toEqual({
-      allowed: true,
-    });
-  });
-
   it("leaves node-only pending drain outside operator scopes", () => {
     expect(resolveLeastPrivilegeOperatorScopesForMethod("node.pending.drain")).toStrictEqual([]);
   });

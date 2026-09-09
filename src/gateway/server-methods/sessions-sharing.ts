@@ -30,8 +30,8 @@ import {
   type PublicSessionShareTokenCodec,
 } from "../control-ui-public-session-token.js";
 import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
-import { revokePrivateRoomExecutions } from "../private-room-executions.js";
 import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
+import { revokePrivateRoomExecutions } from "../private-room-executions.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   isKnownSessionMemberIdentity,

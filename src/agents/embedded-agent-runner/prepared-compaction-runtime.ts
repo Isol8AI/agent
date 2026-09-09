@@ -4,7 +4,6 @@
  */
 import fs from "node:fs/promises";
 import os from "node:os";
-import { getPrivateRoomExecution } from "../private-room-execution.js";
 import { isAcpRuntimeSpawnAvailable } from "../../acp/runtime/availability.js";
 import {
   formatActiveNodeContextLabel,
@@ -45,6 +44,7 @@ import {
   resolveModelAuthMode,
 } from "../model-auth.js";
 import { supportsModelTools } from "../model-tool-support.js";
+import { getPrivateRoomExecution } from "../private-room-execution.js";
 import { resolveAgentPromptSurfaceForSessionKey } from "../prompt-surface.js";
 import { collectRuntimeChannelCapabilities } from "../runtime-capabilities.js";
 import {
@@ -336,23 +336,25 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       [...normalizableToolProjection.tools],
       runtimePlanModelContext,
     );
-    bundleMcpRuntime = toolsEnabled && !getPrivateRoomExecution()
-      ? await createBundleMcpToolRuntime({
-          workspaceDir: effectiveWorkspace,
-          cfg: params.config,
-          reservedToolNames: tools.map((tool) => tool.name),
-        })
-      : undefined;
-    bundleLspRuntime = toolsEnabled && !getPrivateRoomExecution()
-      ? await createBundleLspToolRuntime({
-          workspaceDir: effectiveWorkspace,
-          cfg: params.config,
-          reservedToolNames: [
-            ...tools.map((tool) => tool.name),
-            ...(bundleMcpRuntime?.tools.map((tool) => tool.name) ?? []),
-          ],
-        })
-      : undefined;
+    bundleMcpRuntime =
+      toolsEnabled && !getPrivateRoomExecution()
+        ? await createBundleMcpToolRuntime({
+            workspaceDir: effectiveWorkspace,
+            cfg: params.config,
+            reservedToolNames: tools.map((tool) => tool.name),
+          })
+        : undefined;
+    bundleLspRuntime =
+      toolsEnabled && !getPrivateRoomExecution()
+        ? await createBundleLspToolRuntime({
+            workspaceDir: effectiveWorkspace,
+            cfg: params.config,
+            reservedToolNames: [
+              ...tools.map((tool) => tool.name),
+              ...(bundleMcpRuntime?.tools.map((tool) => tool.name) ?? []),
+            ],
+          })
+        : undefined;
     const filteredBundledTools = applyFinalEffectiveToolPolicy({
       bundledTools: [...(bundleMcpRuntime?.tools ?? []), ...(bundleLspRuntime?.tools ?? [])],
       config: params.config,

@@ -282,6 +282,7 @@ export function readSqliteTableColumns(db: DatabaseSync, tableName: string): Set
   if (!table) {
     return null;
   }
+  // SAFETY: SQLite PRAGMA table_info rows expose the selected table's name column.
   const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
     name?: unknown;
   }>;
@@ -294,11 +295,14 @@ export function ensureSessionMemoryPrivacyColumns(db: DatabaseSync): void {
   if (windows && !windows.has("memory_restricted")) {
     // NULL is unknown, not permission to index an older retained transcript.
     db.exec("ALTER TABLE session_windows ADD COLUMN memory_restricted INTEGER;");
-    const rows = db.prepare(`
+    // SAFETY: The fixed SELECT aliases exactly match the row shape consumed below.
+    const rows = db
+      .prepare(`
       SELECT n.current_session_id, n.entry_json, n.session_key, n.updated_at
       FROM session_nodes n JOIN session_windows w
         ON w.session_key = n.session_key AND w.session_id = n.current_session_id
-    `).all() as Array<{
+    `)
+      .all() as Array<{
       current_session_id: string;
       entry_json: string;
       session_key: string;

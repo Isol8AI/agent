@@ -1,8 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { assertPrivateRoomExecutionTarget, stampPrivateRoomAssistant } from "../../agents/private-room-execution.js";
 import { isDeepStrictEqual } from "node:util";
 import { resolveTimestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import {
+  assertPrivateRoomExecutionTarget,
+  stampPrivateRoomAssistant,
+} from "../../agents/private-room-execution.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import type {
   TranscriptMessageAppendOptions,

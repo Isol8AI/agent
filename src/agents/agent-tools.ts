@@ -12,8 +12,8 @@ import { messageToolOwnsVisibleReply } from "../auto-reply/source-reply-delivery
 import type { ThinkLevel } from "../auto-reply/thinking.shared.js";
 import type { ChatType } from "../channels/chat-type.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
-import type { ModelCompatConfig } from "../config/types.models.js";
 import { resolvePrivateRoomPolicy } from "../config/sessions/private-room-policy.js";
+import type { ModelCompatConfig } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GroupToolPolicyConfig } from "../config/types.tools.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
@@ -35,7 +35,6 @@ import type { SkillSnapshot, SkillUsagePath } from "../skills/types.js";
 import type { SkillWorkshopRunOptions } from "../skills/workshop/types.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import type { OperationalRunInstanceRef } from "./admitted-run-context.js";
-import { getPrivateRoomExecution } from "./private-room-execution.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import {
   bindAssembledAgentToolActionDescriptor,
@@ -91,6 +90,7 @@ import type { ModelAuthMode } from "./model-auth.js";
 import { resolveOpenClawPluginToolsForOptions } from "./openclaw-plugin-tools.js";
 import { createOpenClawTools, filterToolsByClientCaps } from "./openclaw-tools.js";
 import type { PreparedModelRuntimeSnapshot } from "./prepared-model-runtime.js";
+import { getPrivateRoomExecution } from "./private-room-execution.js";
 import type { SandboxContext } from "./sandbox.js";
 import { resolveSandboxFileIdentity } from "./sandbox/file-mutation-identity.js";
 import {
@@ -418,14 +418,24 @@ type OpenClawCodingToolsOptions = {
 
 function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions): AnyAgentTool[] {
   const sandbox = options?.sandbox?.enabled ? options.sandbox : undefined;
-  const privatePolicy = resolvePrivateRoomPolicy({ cfg: options?.config,
-    sessionKey: options?.runSessionKey ?? options?.sessionKey, agentId: options?.agentId });
-  if (privatePolicy && (!sandbox?.required || sandbox.backendId !== "private-room-files-v1" ||
-      sandbox.workspaceDir !== privatePolicy.sessionRoot || sandbox.workspaceAccess !== "none")) {
+  const privatePolicy = resolvePrivateRoomPolicy({
+    cfg: options?.config,
+    sessionKey: options?.runSessionKey ?? options?.sessionKey,
+    agentId: options?.agentId,
+  });
+  if (
+    privatePolicy &&
+    (!sandbox?.required ||
+      sandbox.backendId !== "private-room-files-v1" ||
+      sandbox.workspaceDir !== privatePolicy.sessionRoot ||
+      sandbox.workspaceAccess !== "none")
+  ) {
     throw new Error("Private room tools require the exact room sandbox");
   }
   const privateExecution = privatePolicy ? getPrivateRoomExecution() : undefined;
-  if (privatePolicy && !privateExecution) { throw new Error("Private room tools require a live admitted execution"); }
+  if (privatePolicy && !privateExecution) {
+    throw new Error("Private room tools require a live admitted execution");
+  }
   const isMemoryFlushRun = options?.trigger === "memory";
   if (isMemoryFlushRun && !options?.memoryFlushWritePath) {
     throw new Error("memoryFlushWritePath required for memory-triggered tool runs");
@@ -617,8 +627,10 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     includePluginTools: true,
   };
   const includeBaseCodingTools = includeCoreTools && toolConstructionPlan.includeBaseCodingTools;
-  const includeShellTools = !privatePolicy && includeCoreTools && toolConstructionPlan.includeShellTools;
-  const includeOpenClawTools = !privatePolicy && includeCoreTools && toolConstructionPlan.includeOpenClawTools;
+  const includeShellTools =
+    !privatePolicy && includeCoreTools && toolConstructionPlan.includeShellTools;
+  const includeOpenClawTools =
+    !privatePolicy && includeCoreTools && toolConstructionPlan.includeOpenClawTools;
   const includeChannelTools = !privatePolicy && toolConstructionPlan.includeChannelTools;
   const includePluginTools = !privatePolicy && toolConstructionPlan.includePluginTools;
   const workspaceOnly =
@@ -667,7 +679,9 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     readOnly,
     sandbox,
     skillsSnapshot: privatePolicy ? undefined : options?.skillsSnapshot,
-    skillInstructionPaths: privatePolicy ? undefined : options?.skillUsagePaths?.map((entry) => entry.readPath),
+    skillInstructionPaths: privatePolicy
+      ? undefined
+      : options?.skillUsagePaths?.map((entry) => entry.readPath),
     skillInstructionDeliveryCache: options?.skillInstructionDeliveryCache,
     modelContextWindowTokens: options?.modelContextWindowTokens,
     imageSanitization,
@@ -1063,7 +1077,7 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
   });
   // Host-bound ring-zero tools carry their own authority checks. Agent policy
   // must not deadlock setup, but the tools still receive schema/hook wrappers.
-  const authorizedTools = applyDelegationCapability(
+  let authorizedTools = applyDelegationCapability(
     mergeAgentRingZeroTools(ringZeroTools, subagentFiltered),
     options?.delegationCapability,
   ).filter(
@@ -1080,11 +1094,9 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     authorizedTools.push(swarmStructuredOutputTool);
   }
   if (privatePolicy) {
-    for (let index = authorizedTools.length - 1; index >= 0; index--) {
-      if (!privatePolicy.allowedCapabilities.includes(`tool:${authorizedTools[index].name}`)) {
-        authorizedTools.splice(index, 1);
-      }
-    }
+    authorizedTools = authorizedTools.filter((tool) =>
+      privatePolicy.allowedCapabilities.includes(`tool:${tool.name}`),
+    );
   }
   authorizedTools.forEach(bindAssembledAgentToolActionDescriptor);
   processToolAvailabilityRef.value = authorizedTools.some((tool) => tool.name === "process");
@@ -1147,13 +1159,18 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
     recordToolPrepStage: options?.recordToolPrepStage,
   }).map((tool) => {
     const bound = wrapToolWithGatewayCallerIdentity(tool, toolCallerIdentity);
-    if (!privateExecution) { return bound; }
-    return copyAgentToolMetadata(bound, { ...bound, execute: async (...args: Parameters<AnyAgentTool["execute"]>) => {
-      privateExecution.assertCurrent();
-      const result = await bound.execute(...args);
-      privateExecution.assertCurrent();
-      return result;
-    } });
+    if (!privateExecution) {
+      return bound;
+    }
+    return copyAgentToolMetadata(bound, {
+      ...bound,
+      execute: async (...args: Parameters<AnyAgentTool["execute"]>) => {
+        privateExecution.assertCurrent();
+        const result = await bound.execute(...args);
+        privateExecution.assertCurrent();
+        return result;
+      },
+    });
   });
 }
 
