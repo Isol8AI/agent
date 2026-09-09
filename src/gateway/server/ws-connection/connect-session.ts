@@ -16,7 +16,10 @@ import { resolveLocalNodeId } from "../../../node-host/local-id.js";
 import { roleScopesAllow } from "../../../shared/operator-scope-compat.js";
 import { recordRemoteNodeInfo, refreshRemoteNodeBins } from "../../../skills/runtime/remote.js";
 import { classifyTailscaleLogin } from "../../../state/user-profiles-tailscale-login.js";
-import { adoptTailscaleProfileAvatar } from "../../../state/user-profiles.js";
+import {
+  adoptTailscaleProfileAvatar,
+  getUserProfileListItem,
+} from "../../../state/user-profiles.js";
 import {
   isBrowserCopilotClient,
   isEphemeralGatewayClient,
@@ -127,6 +130,7 @@ export async function attachAuthenticatedGatewayConnect(
     pairingLocality,
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
+    trustedBrokerProfileId,
   } = state;
   if (!(await prepareGatewayNodeConnect(context, state))) {
     return;
@@ -195,15 +199,34 @@ export async function attachAuthenticatedGatewayConnect(
   });
   const rolesConfigured = Boolean(context.configSnapshot.gateway?.roles);
   const sharedSecretOperatorOwner =
-    role === "operator" && (authMethod === "token" || authMethod === "password");
+    !trustedBrokerProfileId &&
+    role === "operator" &&
+    (authMethod === "token" || authMethod === "password");
   // Synthetic callers bypass WS admission; ephemeral control-plane clients stay unprofiled.
   const ownerProfileExpected =
     shouldTrackPresence &&
+    !trustedBrokerProfileId &&
     shouldUseGatewayOwnerProfile({ role, authenticatedUserId, authMethod, rolesConfigured });
   let authenticatedUserProfile: GatewayWsClient["authenticatedUserProfile"];
+  if (trustedBrokerProfileId) {
+    try {
+      const profile = getUserProfileListItem(trustedBrokerProfileId);
+      if (profile.id !== trustedBrokerProfileId) {
+        throw new Error("trusted broker profile mapping is not canonical");
+      }
+      authenticatedUserProfile = resolveAuthenticatedProfile(profile.id, profile.updatedAt);
+    } catch (error) {
+      logWsControl.warn(
+        `trusted broker profile resolution failed conn=${connId}: ${formatForLog(error)}`,
+      );
+      await rejectUnavailableProfileConnect(context, error);
+      return;
+    }
+  }
   if (
-    ownerProfileExpected ||
-    (authenticatedUserId && (!resolveAuthenticatedGitHubIdentity || rolesConfigured))
+    !authenticatedUserProfile &&
+    (ownerProfileExpected ||
+      (authenticatedUserId && (!resolveAuthenticatedGitHubIdentity || rolesConfigured)))
   ) {
     try {
       // The live profile callback refreshes edits and detached provider-avatar adoption.
@@ -392,7 +415,8 @@ export async function attachAuthenticatedGatewayConnect(
   const prepareLocalUserIngress = (profile = authenticatedUserProfile) =>
     prepareGatewayLocalUserIngress({
       authMethod,
-      authenticatedUserExpected: Boolean(authenticatedUserId) || ownerProfileExpected,
+      authenticatedUserExpected:
+        Boolean(authenticatedUserId) || ownerProfileExpected || Boolean(trustedBrokerProfileId),
       ...(profile
         ? {
             profile: {

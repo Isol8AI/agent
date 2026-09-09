@@ -63,6 +63,34 @@ describe("gateway identity scope grants config", () => {
   });
 });
 
+describe("gateway trusted broker profile config", () => {
+  test("accepts an exact device-to-profile binding", () => {
+    const result = OpenClawSchema.safeParse({
+      gateway: {
+        auth: {
+          mode: "token",
+          token: "secret",
+          trustedBrokerProfiles: {
+            ["a".repeat(64)]: "profile-human-1",
+          },
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  test.each([
+    { bindings: { short: "profile-human-1" }, name: "non-device id" },
+    { bindings: { ["a".repeat(64)]: "gateway-owner" }, name: "owner profile" },
+    { bindings: { ["a".repeat(64)]: "profile|human" }, name: "noncanonical profile id" },
+  ])("rejects a $name binding", ({ bindings }) => {
+    expect(
+      OpenClawSchema.safeParse({ gateway: { auth: { trustedBrokerProfiles: bindings } } }).success,
+    ).toBe(false);
+  });
+});
+
 describe("gateway operator role config", () => {
   const validRole = {
     sessions: { others: "view" },

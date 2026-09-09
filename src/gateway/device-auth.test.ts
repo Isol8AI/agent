@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildDeviceAuthPayload,
   buildDeviceAuthPayloadV3,
+  buildDeviceAuthPayloadV4,
   normalizeDeviceMetadataForAuth,
 } from "./device-auth.js";
 
@@ -43,6 +44,24 @@ describe("device-auth payload vectors", () => {
         }),
       expected:
         "v3|dev-1|openclaw-macos|ui|operator|operator.admin,operator.read|1700000000000|tok-123|nonce-abc|ios|iphone",
+    },
+    {
+      name: "binds a trusted broker profile in canonical v4 payloads",
+      build: () =>
+        buildDeviceAuthPayloadV4({
+          deviceId: "dev-3",
+          clientId: "gateway-client",
+          clientMode: "backend",
+          role: "operator",
+          scopes: ["operator.read", "operator.write"],
+          signedAtMs: 1_700_000_000_002,
+          token: "tok-456",
+          nonce: "nonce-ghi",
+          platform: "Linux",
+          trustedBrokerProfileId: "profile-human-1",
+        }),
+      expected:
+        "v4|dev-3|gateway-client|backend|operator|operator.read,operator.write|1700000000002|tok-456|nonce-ghi|linux||profile-human-1",
     },
     {
       name: "keeps empty metadata slots in v3 payloads",

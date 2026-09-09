@@ -8,7 +8,11 @@ import type { ConnectParams } from "../../../../packages/gateway-protocol/src/in
 import { verifyDeviceSignature } from "../../../infra/device-identity.js";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult } from "../../auth.js";
-import { buildDeviceAuthPayload, buildDeviceAuthPayloadV3 } from "../../device-auth.js";
+import {
+  buildDeviceAuthPayload,
+  buildDeviceAuthPayloadV3,
+  buildDeviceAuthPayloadV4,
+} from "../../device-auth.js";
 import {
   isLoopbackAddress,
   isLoopbackHost,
@@ -296,7 +300,7 @@ export function resolveDeviceSignaturePayloadVersion(params: {
   scopes: string[];
   signedAtMs: number;
   nonce: string;
-}): "v3" | "v2" | null {
+}): "v4" | "v3" | "v2" | null {
   const signatureToken = resolveSignatureToken(params.connectParams);
   const basePayload = {
     deviceId: params.device.id,
@@ -308,6 +312,18 @@ export function resolveDeviceSignaturePayloadVersion(params: {
     token: signatureToken,
     nonce: params.nonce,
   };
+  const trustedBrokerProfileId = params.connectParams.auth?.trustedBrokerProfileId;
+  if (trustedBrokerProfileId) {
+    const payloadV4 = buildDeviceAuthPayloadV4({
+      ...basePayload,
+      platform: params.connectParams.client.platform,
+      deviceFamily: params.connectParams.client.deviceFamily,
+      trustedBrokerProfileId,
+    });
+    return verifyDeviceSignature(params.device.publicKey, payloadV4, params.device.signature)
+      ? "v4"
+      : null;
+  }
   const payloadV3 = buildDeviceAuthPayloadV3({
     ...basePayload,
     platform: params.connectParams.client.platform,
