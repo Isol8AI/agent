@@ -2,7 +2,11 @@ import type { Static } from "typebox";
 import { Type } from "typebox";
 import { closedObject } from "./closed-object.js";
 import { NonEmptyString } from "./primitives.js";
-import { SessionSharingRoleSchema, SessionVisibilitySchema } from "./sessions-sharing-values.js";
+import {
+  SessionMemberIdentitySchema,
+  SessionSharingRoleSchema,
+  SessionVisibilitySchema,
+} from "./sessions-sharing-values.js";
 import { SessionCreatedActorSchema } from "./sessions.js";
 
 /** A selectable sharing identity is a created actor with a durable id. */
@@ -13,9 +17,11 @@ export const SessionSharingIdentitySchema = closedObject({
 
 export {
   SESSION_VISIBILITY_VALUES,
+  SessionMemberIdentitySchema,
   SessionSharingRoleSchema,
   SessionVisibilitySchema,
   type SessionSharingRole,
+  type SessionMemberIdentity,
   type SessionVisibility,
 } from "./sessions-sharing-values.js";
 
@@ -61,6 +67,8 @@ export const SessionPublicShareSetResultSchema = closedObject({
 export const SessionMembersListParamsSchema = closedObject(SessionSharingTargetParamsSchema);
 
 export const SessionMemberSchema = closedObject({
+  identity: SessionMemberIdentitySchema,
+  /** Legacy profile-only alias retained while existing clients move to `identity`. */
   identityId: NonEmptyString,
   addedBy: NonEmptyString,
   addedAt: Type.Integer({ minimum: 0 }),
@@ -68,6 +76,8 @@ export const SessionMemberSchema = closedObject({
 
 export const SessionMemberEvidenceSchema = Object.assign(
   closedObject({
+    identity: SessionMemberIdentitySchema,
+    /** Legacy profile-only alias retained while existing clients move to `identity`. */
     identityId: NonEmptyString,
     addedBy: Type.Optional(NonEmptyString),
     /** Explicit principal-less evidence; omission means no actor evidence was supplied. */
@@ -97,16 +107,23 @@ export const SessionMembersListEvidenceResultSchema = closedObject({
   allowedVisibilities: Type.Array(SessionVisibilitySchema),
 });
 
-export const SessionMemberAddParamsSchema = closedObject({
-  ...SessionSharingTargetParamsSchema,
-  identityId: NonEmptyString,
-});
+export const SessionMemberAddParamsSchema = Object.assign(
+  closedObject({
+    ...SessionSharingTargetParamsSchema,
+    identity: Type.Optional(SessionMemberIdentitySchema),
+    /** Legacy requests without a namespace are interpreted as profile membership. */
+    identityId: Type.Optional(NonEmptyString),
+  }),
+  { anyOf: [{ required: ["identity"] }, { required: ["identityId"] }] },
+);
 
 export const SessionMemberRemoveParamsSchema = SessionMemberAddParamsSchema;
 
 export const SessionMemberMutationResultSchema = closedObject({
   ok: Type.Literal(true),
   sessionKey: NonEmptyString,
+  identity: SessionMemberIdentitySchema,
+  /** Legacy profile-only alias. Typed consumers must use `identity`. */
   identityId: NonEmptyString,
 });
 
@@ -118,6 +135,8 @@ const SessionSharingEventTargetFields = {
 
 const SessionSharingEventChangeFields = {
   visibility: Type.Optional(SessionVisibilitySchema),
+  identity: Type.Optional(SessionMemberIdentitySchema),
+  /** Legacy profile-only alias. */
   identityId: Type.Optional(NonEmptyString),
   ts: Type.Integer({ minimum: 0 }),
 };

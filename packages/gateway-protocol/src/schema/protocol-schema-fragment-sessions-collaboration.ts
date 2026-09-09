@@ -23,6 +23,7 @@ export const SessionCollaborationProtocolSchemas = {
   SessionGitHubPublicationResult: sessionGitHubPublication.SessionGitHubPublicationResultSchema,
   SessionVisibility: sessionsSharing.SessionVisibilitySchema,
   SessionSharingIdentity: sessionsSharing.SessionSharingIdentitySchema,
+  SessionMemberIdentity: sessionsSharing.SessionMemberIdentitySchema,
   SessionSharingRole: sessionsSharing.SessionSharingRoleSchema,
   SessionVisibilitySetParams: sessionsSharing.SessionVisibilitySetParamsSchema,
   SessionVisibilitySetResult: sessionsSharing.SessionVisibilitySetResultSchema,

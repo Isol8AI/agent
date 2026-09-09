@@ -6,7 +6,12 @@ import {
 import { recordPairedNodeHostStats } from "../../infra/device-pairing-node.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import type { NodeEventContext } from "../server-node-events-types.js";
-import { resolveDispatchableNodeSession, respondPairingChanged } from "./nodes.shared.js";
+import { resolveSessionSharingTarget, resolveSessionVisibility } from "../session-sharing.js";
+import {
+  resolveDispatchableNodeSession,
+  respondPairingChanged,
+  respondRestrictedNodeSession,
+} from "./nodes.shared.js";
 import { respondUnavailableOnThrow } from "./response.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
@@ -97,6 +102,18 @@ export const nodeEventHandlers: GatewayRequestHandlers = {
             sessionKey: eventParams.sessionKey,
             terminal: eventParams.terminal,
           }),
+        authorizeNodeSessionAccess: (sessionKey) => {
+          try {
+            const target = resolveSessionSharingTarget({
+              cfg: context.getRuntimeConfig(),
+              sessionKey,
+              exactRead: true,
+            });
+            return !target || resolveSessionVisibility(target.entry) !== "restricted";
+          } catch {
+            return false;
+          }
+        },
         updateNodePresenceActivity: (activity) => {
           const updated = context.nodeRegistry.updatePresenceActivity(activity);
           return updated?.lastActiveAtMs !== undefined && updated.presenceUpdatedAtMs !== undefined
@@ -163,6 +180,10 @@ export const nodeEventHandlers: GatewayRequestHandlers = {
       );
       if (result?.reason === "pairing_changed") {
         respondPairingChanged(respond);
+        return;
+      }
+      if (result?.reason === "restricted_session") {
+        respondRestrictedNodeSession(respond);
         return;
       }
       respond(true, result ?? { ok: true }, undefined);

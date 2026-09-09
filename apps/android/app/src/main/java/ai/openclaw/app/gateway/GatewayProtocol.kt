@@ -927,6 +927,7 @@ enum class GatewayMethod(
   SkillsWorkshopRead("skills.workshop.read"),
   SessionPublicShareSet("session.publicShare.set"),
   ClawsMonitors("claws.monitors"),
+  SessionsRoomCreate("sessions.room.create"),
 }
 
 enum class GatewayEvent(

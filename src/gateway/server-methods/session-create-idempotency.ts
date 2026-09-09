@@ -1,14 +1,20 @@
 import { createHash } from "node:crypto";
-import { stableStringify } from "@openclaw/normalization-core";
+import { expectDefined, stableStringify } from "@openclaw/normalization-core";
 import {
   ErrorCodes,
   SESSION_CREATE_IDEMPOTENCY_RETENTION_MS,
   errorShape,
   missingScopeErrorShape,
+  validateSessionsRoomCreateParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { DEDUPE_MAX } from "../server-constants.js";
 import type { GatewayInflightResult } from "./inflight.js";
-import type { GatewayRequestContext, GatewayRequestHandler } from "./types.js";
+import type {
+  GatewayRequestContext,
+  GatewayRequestHandler,
+  GatewayRequestHandlers,
+} from "./types.js";
+import { assertValidParams } from "./validation.js";
 
 type SessionCreateAuthorization = { role: string | null; scopes: readonly string[] };
 type SessionCreateEntry = {
@@ -25,7 +31,7 @@ const sessionCreatesByContext = new WeakMap<
   Map<string, Map<string, SessionCreateEntry>>
 >();
 
-export function idempotentSessionCreate(handler: GatewayRequestHandler): GatewayRequestHandler {
+function idempotentSessionCreate(handler: GatewayRequestHandler): GatewayRequestHandler {
   return async (request) => {
     const idempotencyKey = request.params.idempotencyKey;
     if (typeof idempotencyKey !== "string" || !idempotencyKey) {
@@ -171,5 +177,24 @@ export function idempotentSessionCreate(handler: GatewayRequestHandler): Gateway
     entries.set(idempotencyKey, entry);
     const result = await work;
     request.respond(result.ok, result.payload, result.error, result.meta);
+  };
+}
+
+export function finalizeSessionCreateHandlers(handlers: GatewayRequestHandlers): void {
+  handlers["sessions.create"] = idempotentSessionCreate(
+    expectDefined(handlers["sessions.create"], "sessions.create handler"),
+  );
+  handlers["sessions.room.create"] = async (options) => {
+    if (
+      !assertValidParams(
+        options.params,
+        validateSessionsRoomCreateParams,
+        "sessions.room.create",
+        options.respond,
+      )
+    ) {
+      return;
+    }
+    await expectDefined(handlers["sessions.create"], "sessions.create handler")(options);
   };
 }

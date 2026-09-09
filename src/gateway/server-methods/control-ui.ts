@@ -19,8 +19,8 @@ import {
 } from "../control-ui-github-preview.js";
 import { parseControlUiSessionPullRequestsSubscribeParams } from "../control-ui-session-pr-subscriptions.js";
 import { requestCurrentGitHubOAuthRefresh } from "../github-oauth-lifecycle.js";
+import { resolveSessionPreviewAuthority } from "../session-preview-authority.js";
 import { resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId } from "../session-request-agent.js";
-import { createSessionListEntryFilter } from "../session-sharing.js";
 import { buildGatewaySessionRow } from "../session-utils.js";
 import { resolveAgentIdOrRespondError } from "./agent-id-shared.js";
 import { loadSessionEntriesForTarget } from "./sessions-shared.js";
@@ -166,8 +166,19 @@ function loadControlUiSessionPreview(
   // Hover previews must not reveal more than sessions.list: apply the same
   // incognito/draft sharing predicate so a member cannot preview-by-key a
   // session the sidebar hides from them.
-  const entryFilter = createSessionListEntryFilter({ client, cfg });
-  if (entryFilter && !entryFilter(target.canonicalKey, entry)) {
+  const authority = resolveSessionPreviewAuthority({
+    cfg,
+    client,
+    mode: "list",
+    sessionKey: target.canonicalKey,
+    agentId: target.agentId,
+  });
+  if (
+    !authority ||
+    authority.sessionId !== entry.sessionId ||
+    authority.canonicalKey !== target.canonicalKey ||
+    authority.storePath !== storePath
+  ) {
     return null;
   }
   const row = buildGatewaySessionRow({
@@ -235,7 +246,13 @@ export function createControlUiHandlers(
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, message, details));
       }
     },
-    "controlUi.sessionPreview": async ({ params, client, context, respond }) => {
+    "controlUi.sessionPreview": async ({
+      params,
+      client,
+      context,
+      respond,
+      sessionMutationAuthorization,
+    }) => {
       const sessionKey = parseSessionPreviewKey(params);
       if (!sessionKey) {
         respond(
@@ -246,11 +263,9 @@ export function createControlUiHandlers(
         return;
       }
       try {
-        respond(
-          true,
-          projectSessionPreview(await loadSessionPreview(sessionKey, context, client)),
-          undefined,
-        );
+        const preview = await loadSessionPreview(sessionKey, context, client);
+        sessionMutationAuthorization?.assertCurrent();
+        respond(true, projectSessionPreview(preview), undefined);
       } catch {
         respond(
           false,
@@ -279,6 +294,15 @@ export function createControlUiHandlers(
           false,
           undefined,
           errorShape(ErrorCodes.UNAVAILABLE, "session pull request subscriptions unavailable"),
+        );
+        return;
+      }
+      const authorized = subscriptions.authorize?.(connId, parsed.sessionKeys);
+      if (authorized !== undefined && !authorized) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.FORBIDDEN, "session pull request subscription is not authorized"),
         );
         return;
       }

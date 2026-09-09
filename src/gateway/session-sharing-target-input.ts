@@ -11,6 +11,7 @@ import {
 } from "./session-groups.js";
 import {
   isApprovalSessionTargetMethod,
+  isSessionReadAccessMethod,
   sessionMutationTargetFields,
 } from "./session-method-policy.js";
 import type { SessionMutationTarget } from "./session-mutation-authorization-error.js";
@@ -23,7 +24,11 @@ export function resolveDirectSessionTargets(
   method: string,
   params: unknown,
 ): SessionMutationTarget[] {
-  if (method === "sessions.create" || method === "sessions.list") {
+  if (
+    method === "sessions.create" ||
+    method === "sessions.room.create" ||
+    method === "sessions.list"
+  ) {
     return [];
   }
   if (!params || typeof params !== "object" || Array.isArray(params)) {
@@ -187,6 +192,12 @@ export function resolveSessionMutationTargets(params: {
         })
       : undefined;
   }
+  if (isSessionReadAccessMethod(params.method)) {
+    const directTargets = resolveDirectSessionTargets(params.method, params.requestParams);
+    if (directTargets.length > 0) {
+      return directTargets;
+    }
+  }
   if (
     params.method === "sessions.groups.rename" ||
     params.method === "sessions.groups.delete" ||
@@ -227,7 +238,11 @@ export function resolveSessionMutationTargets(params: {
   if (directTargets.length) {
     return directTargets;
   }
-  if (params.method === "board.event" || params.method === "board.action") {
+  if (
+    params.method === "board.event" ||
+    params.method === "board.action" ||
+    params.method === "board.data.read"
+  ) {
     const ticket = readSessionSharingStringParam(params.requestParams, "ticket");
     const claims = ticket
       ? resolveAuthorizedBoardViewTicketClaims(ticket, { gatewayContext: params.context })

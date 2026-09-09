@@ -4,7 +4,10 @@ import {
   recordSessionParticipant,
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
-import { addSessionMember } from "../../config/sessions/session-sharing-store.js";
+import {
+  addSessionMember,
+  removeSessionMember,
+} from "../../config/sessions/session-sharing-store.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
@@ -20,6 +23,7 @@ import {
   listSessions,
   requestContext,
 } from "./sessions-read-cache.test-support.js";
+import { sessionReadHandlers } from "./sessions-read.js";
 
 setupGatewaySessionsHandlerTestHarness();
 afterEach(() => {
@@ -184,6 +188,196 @@ test("a hidden-foreign role cannot discover sessions through search, batch previ
     ok: false,
     error: { message: `No session found: ${foreignKey}` },
   });
+});
+
+test("restricted reads require typed membership and never trust participant history", async () => {
+  const ownerId = ensureProfileForEmail("restricted-owner@example.test").id;
+  const memberId = ensureProfileForEmail("restricted-member@example.test").id;
+  const participantId = ensureProfileForEmail("restricted-participant@example.test").id;
+  const sessionKey = "agent:main:restricted-read-surfaces";
+  const sessionId = "session-restricted-read-surfaces";
+  const parentKey = "agent:main:visible-parent";
+  const childKey = "agent:main:restricted-child";
+  const visibleOwnerId = ensureProfileForEmail("visible-owner@example.test").id;
+  const storePath = resolveStorePath(undefined, { agentId: "main" });
+  await replaceSessionEntry(
+    { agentId: "main", sessionKey: parentKey, storePath },
+    {
+      sessionId: "session-visible-parent",
+      updatedAt: 40,
+      createdActor: { type: "human", source: "profile", id: visibleOwnerId },
+      visibility: "shared",
+    },
+  );
+  await replaceSessionEntry(
+    { agentId: "main", sessionKey, storePath },
+    {
+      sessionId,
+      updatedAt: 42,
+      createdActor: { type: "human", source: "profile", id: ownerId },
+      visibility: "restricted",
+      roomKind: "group-dm",
+      sandbox: "required",
+    },
+  );
+  await seedLinearSessionTranscript({
+    agentId: "main",
+    contents: ["restricted search needle"],
+    sessionId,
+    sessionKey,
+    storePath,
+  });
+  await replaceSessionEntry(
+    { agentId: "main", sessionKey: childKey, storePath },
+    {
+      sessionId: "session-restricted-child",
+      updatedAt: 43,
+      createdActor: { type: "human", source: "profile", id: ownerId },
+      visibility: "restricted",
+      roomKind: "thread",
+      parentSessionKey: parentKey,
+      sandbox: "required",
+    },
+  );
+  addSessionMember(
+    { agentId: "main", sessionKey, storePath },
+    {
+      identity: { type: "profile", id: memberId },
+      addedBy: ownerId,
+      addedAt: 1,
+    },
+  );
+  addSessionMember(
+    { agentId: "main", sessionKey: childKey, storePath },
+    {
+      identity: { type: "profile", id: memberId },
+      addedBy: ownerId,
+      addedAt: 1,
+    },
+  );
+  recordSessionParticipant(
+    { agentId: "main", sessionKey, storePath },
+    { identity: { type: "profile", id: participantId }, promptedAt: 2 },
+  );
+  const cfg: OpenClawConfig = {
+    gateway: {
+      roles: {
+        default: "writer",
+        definitions: {
+          writer: {
+            sessions: { others: "write" },
+            agents: "*",
+            scopes: ["operator.read", "operator.write"],
+          },
+        },
+      },
+    },
+  };
+  const readFor = async (profileId: string) => {
+    const client = identifiedClient(profileId);
+    const options = { client, context: { getRuntimeConfig: () => cfg } };
+    return {
+      searched: await directSessionReq<{ results: Array<{ sessionKey: string }> }>(
+        "sessions.search",
+        { query: "restricted search needle", sessionKeys: [sessionKey] },
+        options,
+      ),
+      listed: await listSessions({
+        client,
+        context: requestContext(cfg),
+        request: {
+          includePeople: true,
+          includeDerivedTitles: true,
+          includeLastMessage: true,
+          limit: 1,
+        },
+      }),
+      listedAll: await listSessions({ client, context: requestContext(cfg), request: {} }),
+      previewed: await directSessionReq<{ previews: Array<{ key: string; status: string }> }>(
+        "sessions.preview",
+        { keys: [sessionKey] },
+        options,
+      ),
+      resolved: await directSessionReq("sessions.resolve", { key: sessionKey }, options),
+      described: await directSessionReq<{ session: { roomKind?: string } | null }>(
+        "sessions.describe",
+        { key: sessionKey },
+        options,
+      ),
+      parentDescribed: await directSessionReq<{
+        session: { childSessions?: string[] } | null;
+      }>("sessions.describe", { key: parentKey }, options),
+      history: await directSessionReq<{ messages: Array<{ content?: unknown }> }>(
+        "sessions.get",
+        { key: sessionKey },
+        options,
+      ),
+    };
+  };
+
+  for (const profileId of [participantId, "restricted-outsider@example.test"]) {
+    const hidden = await readFor(profileId);
+    expect(hidden.searched.payload?.results).toEqual([]);
+    expect(hidden.listed.sessions.some((session) => session.key === sessionKey)).toBe(false);
+    expect(hidden.listed).toMatchObject({ count: 1, totalCount: 1, nextOffset: null });
+    expect(JSON.stringify(hidden.listed)).not.toMatch(
+      new RegExp(`${ownerId}|${memberId}|${participantId}|${childKey}|restricted search needle`),
+    );
+    expect(hidden.previewed.payload?.previews).toEqual([
+      { key: sessionKey, status: "missing", items: [] },
+    ]);
+    expect(hidden.resolved.ok).toBe(false);
+    expect(hidden.described.payload?.session).toBeNull();
+    expect(hidden.parentDescribed.payload?.session).not.toBeNull();
+    expect(hidden.parentDescribed.payload?.session).not.toHaveProperty("childSessions");
+    expect(hidden.history.payload?.messages).toEqual([]);
+  }
+
+  const visible = await readFor(memberId);
+  expect(visible.searched.payload?.results.map((result) => result.sessionKey)).toEqual([
+    sessionKey,
+  ]);
+  expect(visible.listedAll.sessions.find((session) => session.key === sessionKey)).toMatchObject({
+    visibility: "restricted",
+    roomKind: "group-dm",
+    sharingRole: "member",
+  });
+  expect(visible.previewed.payload?.previews[0]?.status).toBe("ok");
+  expect(visible.resolved.ok).toBe(true);
+  expect(visible.described.payload?.session).toMatchObject({ roomKind: "group-dm" });
+  expect(visible.parentDescribed.payload?.session?.childSessions).toEqual([childKey]);
+  expect(visible.history.payload?.messages.map((message) => message.content)).toEqual([
+    "restricted search needle",
+  ]);
+
+  const respond = vi.fn();
+  const previewHandler = sessionReadHandlers["sessions.preview"];
+  if (!previewHandler) {
+    throw new Error("sessions.preview handler unavailable");
+  }
+  const pendingPreview = previewHandler({
+    params: { keys: [sessionKey, parentKey] },
+    client: identifiedClient(memberId),
+    context: requestContext(cfg),
+    respond,
+  } as never);
+  removeSessionMember(
+    { agentId: "main", sessionKey, storePath },
+    { type: "profile", id: memberId },
+    undefined,
+    sessionId,
+  );
+  await pendingPreview;
+  expect(respond).toHaveBeenCalledWith(
+    true,
+    expect.objectContaining({
+      previews: [
+        { key: sessionKey, status: "missing", items: [] },
+        { key: parentKey, status: "empty", items: [] },
+      ],
+    }),
+    undefined,
+  );
 });
 
 test.each(["research", "ops"] as const)(

@@ -29,6 +29,18 @@ export function createGatewayConnectionState(params: {
     const client = clients.getByConnectionId(connId);
     return Boolean(client && !client.invalidated);
   };
+  const canReadSession = (connId: string, sessionKey: string) => {
+    const client = clients.getByConnectionId(connId);
+    return Boolean(
+      client &&
+      canReceiveSessionEvent({
+        cfg: loadRuntimeConfig(),
+        client,
+        event: "controlUi.sessionPullRequests.changed",
+        sessionKeys: [sessionKey],
+      }),
+    );
+  };
   const sessionEventSubscribers = createSessionEventSubscriberRegistry(isConnectionActive);
   const sessionMessageSubscribers = createSessionMessageSubscriberRegistry(isConnectionActive);
   const eventWebPush = createEventWebPushDelivery({ getRuntimeConfig: loadRuntimeConfig });
@@ -82,6 +94,7 @@ export function createGatewayConnectionState(params: {
     connectionWork: new GatewayConnectionWork(),
     mentionInbox,
     isConnectionActive,
+    canReadSession,
     ...gatewayBroadcaster,
     agentRunSeq,
     dedupe,

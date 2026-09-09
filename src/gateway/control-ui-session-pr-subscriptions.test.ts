@@ -169,6 +169,37 @@ describe("control UI session PR subscriptions", () => {
     ).toBe("merged");
   });
 
+  it("denies unauthorized keys and suppresses delivery after membership is revoked", async () => {
+    let allowed = false;
+    const broadcastToConnIds = vi.fn();
+    const load = vi.fn(async () => READY);
+    active = createControlUiSessionPullRequestSubscriptions({
+      broadcastToConnIds,
+      canReadSession: () => allowed,
+      load,
+    });
+
+    expect(active.authorize("conn-a", ["private-room"])).toBe(false);
+    await active.replace("conn-a", ["private-room"]);
+    expect(load).not.toHaveBeenCalled();
+
+    allowed = true;
+    expect(active.authorize("conn-a", ["private-room"])).toBe(true);
+    await active.replace("conn-a", ["private-room"]);
+    expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
+
+    broadcastToConnIds.mockClear();
+    load.mockClear();
+    allowed = false;
+    await active.pollNow();
+    expect(load).not.toHaveBeenCalled();
+    expect(broadcastToConnIds).not.toHaveBeenCalled();
+
+    allowed = true;
+    await active.pollNow();
+    expect(load).not.toHaveBeenCalled();
+  });
+
   it("deduplicates overlapping watchers to one load per key per poll cycle", async () => {
     vi.useFakeTimers();
     const load = vi.fn<

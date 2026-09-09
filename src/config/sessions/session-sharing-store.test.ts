@@ -35,7 +35,12 @@ describe("session sharing store", () => {
       closeOpenClawAgentDatabasesForTest();
 
       expect(listSessionMembers(scope)).toEqual([
-        { identityId: "guest", addedBy: "owner", addedAt: 2 },
+        {
+          identity: { type: "profile", id: "guest" },
+          identityId: "guest",
+          addedBy: "owner",
+          addedAt: 2,
+        },
       ]);
       expect(listSessionMembershipKeys(scope, [scope.sessionKey], "guest")).toEqual(
         new Set([scope.sessionKey]),
@@ -71,8 +76,18 @@ describe("session sharing store", () => {
       ).toBe(true);
 
       expect(listSessionMembers(scope)).toEqual([
-        { identityId: "alice", addedBy: "owner", addedAt: 3 },
-        { identityId: "zoe", addedBy: "owner", addedAt: 2 },
+        {
+          identity: { type: "profile", id: "alice" },
+          identityId: "alice",
+          addedBy: "owner",
+          addedAt: 3,
+        },
+        {
+          identity: { type: "profile", id: "zoe" },
+          identityId: "zoe",
+          addedBy: "owner",
+          addedAt: 2,
+        },
       ]);
       expect(isSessionMember(scope, "alice")).toBe(true);
       expect(
@@ -83,11 +98,40 @@ describe("session sharing store", () => {
         ),
       ).toEqual(new Set([scope.sessionKey]));
       expect(removeSessionMember(scope, "alice")).toEqual({
+        identity: { type: "profile", id: "alice" },
         identityId: "alice",
         addedBy: "owner",
         addedAt: 3,
       });
       expect(removeSessionMember(scope, "alice")).toBeNull();
+    });
+  });
+
+  it("keeps profile and agent identities with the same id distinct", async () => {
+    await withTestDir({ prefix: "openclaw-session-sharing-typed-" }, async (dir) => {
+      const env = { ...process.env, OPENCLAW_STATE_DIR: dir };
+      const scope = { agentId: "main", env, sessionKey: "agent:main:typed-room" };
+      await upsertSessionEntryCore(scope, { sessionId: "typed-room", updatedAt: 1 });
+
+      expect(
+        addSessionMember(scope, {
+          identity: { type: "profile", id: "shared-id" },
+          addedBy: "owner",
+        }).inserted,
+      ).toBe(true);
+      expect(
+        addSessionMember(scope, {
+          identity: { type: "agent", id: "shared-id" },
+          addedBy: "owner",
+        }).inserted,
+      ).toBe(true);
+
+      expect(isSessionMember(scope, { type: "profile", id: "shared-id" })).toBe(true);
+      expect(isSessionMember(scope, { type: "agent", id: "shared-id" })).toBe(true);
+      expect(listSessionMembers(scope).map((member) => member.identity)).toEqual([
+        { type: "agent", id: "shared-id" },
+        { type: "profile", id: "shared-id" },
+      ]);
     });
   });
 
@@ -170,12 +214,22 @@ describe("session sharing store", () => {
         const remove = () => removeSessionMember(scope, "existing");
         if (valid) {
           expect(add().inserted).toBe(true);
-          expect(remove()).toEqual({ identityId: "existing", addedBy: "owner", addedAt: 2 });
+          expect(remove()).toEqual({
+            identity: { type: "profile", id: "existing" },
+            identityId: "existing",
+            addedBy: "owner",
+            addedAt: 2,
+          });
         } else {
           expect(add).toThrow("session changed before sharing mutation");
           expect(remove).toThrow("session changed before sharing mutation");
           expect(listSessionMembers(scope)).toEqual([
-            { identityId: "existing", addedBy: "owner", addedAt: 2 },
+            {
+              identity: { type: "profile", id: "existing" },
+              identityId: "existing",
+              addedBy: "owner",
+              addedAt: 2,
+            },
           ]);
         }
       });

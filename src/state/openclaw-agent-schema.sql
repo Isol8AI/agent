@@ -255,15 +255,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_session_conversations_primary
 
 CREATE TABLE IF NOT EXISTS session_members (
   session_key TEXT NOT NULL,
+  identity_type TEXT NOT NULL DEFAULT 'profile' CHECK (identity_type IN ('profile', 'agent')),
   identity_id TEXT NOT NULL,
   added_by TEXT NOT NULL,
   added_at INTEGER NOT NULL,
-  PRIMARY KEY (session_key, identity_id),
+  PRIMARY KEY (session_key, identity_type, identity_id),
   FOREIGN KEY (session_key) REFERENCES session_nodes(session_key) ON DELETE CASCADE
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS idx_agent_session_members_identity
-  ON session_members(identity_id, session_key);
+  ON session_members(identity_type, identity_id, session_key);
 
 CREATE TABLE IF NOT EXISTS session_suggestions (
   id TEXT PRIMARY KEY,

@@ -45,6 +45,7 @@ export type ChatSessionSharingProps = {
 
 const VISIBILITY_LABEL_KEYS: Record<SessionVisibility, string> = {
   shared: "chat.sessionSharing.shared",
+  restricted: "chat.sessionSharing.restricted",
   "read-only": "chat.sessionSharing.readOnly",
   suggest: "chat.sessionSharing.suggest",
   draft: "chat.sessionSharing.draft",

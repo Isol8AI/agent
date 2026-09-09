@@ -26,14 +26,18 @@ import type {
 import { isSessionCreatorProfile, prepareSessionCreatorProfile } from "./session-creator.js";
 import {
   isRequiredSessionTargetMethod,
+  isSessionReadAccessMethod,
   isSessionProfileDependentMethod,
 } from "./session-method-policy.js";
 import { SessionMutationAuthorizationChangedError } from "./session-mutation-authorization-error.js";
 import {
   authorizeIncognitoSessionTarget,
   authorizeSessionAgentRun,
+  authorizeSessionReadTarget,
   authorizeSessionSharingTarget,
   canManageSessionSharing,
+  canReadSessionSharingTarget,
+  gatewayClientSessionMemberIdentity,
   hiddenSessionNotFound,
   isGatewayAdmin,
   resolveSessionSharingRole,
@@ -79,6 +83,44 @@ const AGENT_RUN_START_METHODS = new Set([
   "wake",
 ]);
 
+function requiresPrivateRoomCapability(method: string): boolean {
+  return (
+    !isSessionReadAccessMethod(method) ||
+    method === "sessions.companion.ask" ||
+    method === "sessions.diff" ||
+    method.startsWith("sessions.files.")
+  );
+}
+
+function authorizeRestrictedPolicyPlaceholder(
+  method: string,
+  target: SessionSharingTarget,
+): ErrorShape | null {
+  if (
+    resolveSessionVisibility(target.entry) !== "restricted" ||
+    !requiresPrivateRoomCapability(method)
+  ) {
+    return null;
+  }
+  const policy = target.entry.privateRoomExecutionPolicy;
+  if (
+    policy?.allowedCapabilities.includes(method) === true ||
+    policy?.allowedCapabilities.includes(`gateway:${method}`) === true
+  ) {
+    return null;
+  }
+  return errorShape(
+    ErrorCodes.INVALID_REQUEST,
+    `private room capability ${method} is unavailable until its isolation policy grants it`,
+    {
+      details: {
+        code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE",
+        sessionKey: target.canonicalKey,
+      },
+    },
+  );
+}
+
 // Documented contract (docs/gateway/protocol.md): these methods authorize by session
 // visibility inside their handler, not by mutation participation. The pipeline still
 // applies incognito checks and the operator role cap: a view/suggest-capped caller
@@ -96,6 +138,7 @@ export {
   authorizeSessionSharingTarget,
   canAccessIncognitoSession,
   canManageSessionSharing,
+  gatewayClientSessionMemberIdentity,
   isGatewayAdmin,
   isResolvedIncognitoSession,
   isSessionVisibilityAllowed,
@@ -121,7 +164,11 @@ export function resolveSessionMutationAuthorization(params: {
   // Progress belongs to the current conversation, not merely its stable session ID.
   // Capture this boundary for admins too so delayed writes cannot revive a reset card.
   const bindsProgressLifecycle = params.method === "progressCard.put";
-  const adminBypass = isGatewayAdmin(params.client) && !authorizesAgentRun;
+  const authorizesRead = isSessionReadAccessMethod(params.method);
+  const adminBypass =
+    isGatewayAdmin(params.client) &&
+    !authorizesAgentRun &&
+    !requiresPrivateRoomCapability(params.method);
   if (adminBypass && !bindsProgressLifecycle) {
     return { error: null };
   }
@@ -265,7 +312,14 @@ export function resolveSessionMutationAuthorization(params: {
       return { error: resolved.error };
     }
     const target = resolved.target;
+    const restrictedAccessError =
+      target && resolveSessionVisibility(target.entry) === "restricted"
+        ? authorizesRead
+          ? authorizeSessionReadTarget({ cfg: getCfg(), client: params.client, target })
+          : authorizeSessionSharingTarget({ cfg: getCfg(), client: params.client, target })
+        : null;
     const error =
+      restrictedAccessError ??
       (target && authorizesAgentRun
         ? authorizeSessionAgentRun({
             cfg: getCfg(),
@@ -273,14 +327,21 @@ export function resolveSessionMutationAuthorization(params: {
             target,
           })
         : null) ??
+      (target ? authorizeRestrictedPolicyPlaceholder(params.method, target) : null) ??
       authorizeIncognitoSessionTarget({
         client: params.client,
         sessionKey: targetRef.sessionKey,
         target,
       }) ??
+      (target && authorizesRead
+        ? authorizeSessionReadTarget({ cfg: getCfg(), client: params.client, target })
+        : null) ??
       (target &&
+      resolveSessionVisibility(target.entry) !== "restricted" &&
+      !authorizesRead &&
       !(
         VISIBILITY_AUTHORIZED_METHODS.has(params.method) &&
+        resolveSessionVisibility(target.entry) !== "restricted" &&
         (operatorSessionCap(params.client, getCfg()) ?? "write") === "write"
       )
         ? authorizeSessionSharingTarget({ cfg: getCfg(), client: params.client, target })
@@ -401,7 +462,22 @@ export function resolveSessionMutationAuthorization(params: {
         if (!current) {
           return;
         }
+        const restrictedAccessError =
+          resolveSessionVisibility(current.entry) === "restricted"
+            ? authorizesRead
+              ? authorizeSessionReadTarget({
+                  cfg: currentCfg,
+                  client: params.client,
+                  target: current,
+                })
+              : authorizeSessionSharingTarget({
+                  cfg: currentCfg,
+                  client: params.client,
+                  target: current,
+                })
+            : null;
         const error =
+          restrictedAccessError ??
           (authorizesAgentRun
             ? authorizeSessionAgentRun({
                 cfg: currentCfg,
@@ -409,16 +485,25 @@ export function resolveSessionMutationAuthorization(params: {
                 target: current,
               })
             : null) ??
+          authorizeRestrictedPolicyPlaceholder(params.method, current) ??
           authorizeIncognitoSessionTarget({
             client: params.client,
             sessionKey: targetRef.sessionKey,
             target: current,
           }) ??
-          authorizeSessionSharingTarget({
-            cfg: currentCfg,
-            client: params.client,
-            target: current,
-          });
+          (authorizesRead
+            ? authorizeSessionReadTarget({
+                cfg: currentCfg,
+                client: params.client,
+                target: current,
+              })
+            : resolveSessionVisibility(current.entry) !== "restricted"
+              ? authorizeSessionSharingTarget({
+                  cfg: currentCfg,
+                  client: params.client,
+                  target: current,
+                })
+              : null);
         if (error) {
           throw new SessionMutationAuthorizationChangedError(error);
         }
@@ -495,13 +580,6 @@ export function canReceiveSessionEvent(params: {
   }
   const operatorActor = resolveGatewayOperatorRoleActor(client);
   const identity = sharingIdentity(client, operatorActor);
-  if (!identity) {
-    return (
-      (!cfg.gateway?.roles || operatorActor?.kind === "system") &&
-      event !== "session.suggestion" &&
-      event !== "session.typing"
-    );
-  }
   const hidesForeignSessions = operatorSessionCap(client, cfg) === "none";
   const sharing = prepareSessionSharing({ cfg, client });
   // Discovery remains lazy; these facts belong only to this recipient check, never a socket send.
@@ -513,10 +591,29 @@ export function canReceiveSessionEvent(params: {
     targetDiscoveryCache: new Map(),
   };
   const visible = sessionKeys.every((sessionKey) => {
-    const snapshot = loadSharingSnapshot({ ...lookup, sessionKey });
-    const isCreator = sharing.isCreator(snapshot.createdActor);
-    if (snapshot.incognito || (hidesForeignSessions && !isCreator)) {
+    const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
+    if (!target) {
       return false;
+    }
+    const snapshot = loadSharingSnapshot({ ...lookup, sessionKey });
+    const isCreator = sharing.isCreator(target.entry.createdActor);
+    if (
+      target.entry.incognito === true ||
+      isIncognitoSessionKey(target.canonicalKey) ||
+      snapshot.incognito ||
+      (hidesForeignSessions && !isCreator)
+    ) {
+      return false;
+    }
+    if (resolveSessionVisibility(target.entry) === "restricted") {
+      return sharing.canReadTarget(target);
+    }
+    if (!identity) {
+      return (
+        (!cfg.gateway?.roles || operatorActor?.kind === "system") &&
+        event !== "session.suggestion" &&
+        event !== "session.typing"
+      );
     }
     if (snapshot.visibility !== "draft" || isCreator) {
       return true;
@@ -524,11 +621,13 @@ export function canReceiveSessionEvent(params: {
     if (event !== "session.typing") {
       return false;
     }
-    const target = resolveSessionSharingTarget({ ...lookup, sessionKey });
-    return target !== null && canManageSessionSharing(sharing.roleForTarget(target));
+    return canManageSessionSharing(sharing.roleForTarget(target));
   });
   if (!visible || event !== "session.suggestion") {
     return visible;
+  }
+  if (!identity) {
+    return false;
   }
   const authorId =
     params.payload && typeof params.payload === "object"
@@ -545,13 +644,23 @@ export function canReceiveSessionEvent(params: {
 
 /** Share caller facts across synchronous selection/role projection, never across an await. */
 export function prepareSessionSharing(params: Pick<SessionSharingRoleParams, "cfg" | "client">) {
-  const identity = sharingIdentity(params.client, resolveGatewayOperatorRoleActor(params.client));
-  const isCreator = prepareSessionCreatorProfile(identity?.id);
+  const operatorActor = resolveGatewayOperatorRoleActor(params.client);
+  const identity = sharingIdentity(params.client, operatorActor);
+  const memberIdentity = gatewayClientSessionMemberIdentity(params.client, operatorActor);
+  const profileCreator = prepareSessionCreatorProfile(
+    memberIdentity?.type === "profile" ? memberIdentity.id : identity?.id,
+  );
+  const isCreator: ReturnType<typeof prepareSessionCreatorProfile> = (actor) =>
+    memberIdentity?.type === "agent"
+      ? actor?.type === "agent" && actor.id === memberIdentity.id
+      : profileCreator(actor);
   return {
     isCreator,
     entryFilter: createSessionListEntryFilter(params, isCreator),
     roleForTarget: (target: SessionSharingTarget, isMember?: boolean) =>
       resolveSessionSharingRole({ ...params, target, isMember }, undefined, isCreator),
+    canReadTarget: (target: SessionSharingTarget, isMember?: boolean) =>
+      canReadSessionSharingTarget({ ...params, target, isMember }),
   };
 }
 
@@ -589,5 +698,7 @@ export function createProfileSessionEntryFilter(
     entry.incognito !== true &&
     !isIncognitoSessionKey(sessionKey) &&
     (creatorMatches(entry.createdActor) ||
-      (params.sessionCap !== "none" && resolveSessionVisibility(entry) !== "draft"));
+      (params.sessionCap !== "none" &&
+        resolveSessionVisibility(entry) !== "draft" &&
+        resolveSessionVisibility(entry) !== "restricted"));
 }

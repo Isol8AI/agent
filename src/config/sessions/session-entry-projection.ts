@@ -31,6 +31,7 @@ const PRIVATE_SESSION_ENTRY_KEYS = [
   "mainRestartRecovery",
   "pendingProjectGitUrl",
   "pendingWorktree",
+  "privateRoomExecutionPolicy",
   "sessionDiffBaselineCapture",
   "transcriptByteCompactionLatch",
 ] as const satisfies readonly (keyof InternalSessionEntry)[];

@@ -43,6 +43,8 @@ import {
   assertOpenClawAgentCurrentRuntimeSchema,
   assertSupportedAgentSchemaVersion,
   assertAgentSchemaVersion,
+  hasPendingSessionKeyContractSchemaMigration,
+  hasPendingSessionProjectColumn,
   hasRetiredAgentStateLeaseSchema,
   hasPendingMemoryChunkMetadataMigration,
   migrateRetiredAgentStateLeaseSchema,
@@ -77,6 +79,10 @@ import {
 } from "./openclaw-agent-participants-migration.js";
 import { hasPendingInputConsumptionColumnMigration } from "./openclaw-agent-pending-inputs-schema.js";
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "./openclaw-agent-schema.js";
+import {
+  migrateSessionMembersSchema,
+  withLegacySessionMembersSchema,
+} from "./openclaw-agent-session-members-migration.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "./openclaw-state-db.js";
 
 type OpenClawAgentMetadataDatabase = Pick<OpenClawAgentKyselyDatabase, "schema_meta">;
@@ -121,24 +127,6 @@ function dropLegacyRuntimeJournalSchemas(db: DatabaseSync): void {
       DROP TABLE trajectory_runtime_events;
     `);
   }
-}
-
-function hasPendingSessionKeyContractSchemaMigration(db: DatabaseSync): boolean {
-  const sessionNodeColumns = readSqliteTableColumns(db, "session_nodes");
-  if (!sessionNodeColumns) {
-    return false;
-  }
-  const hasContractTable = Boolean(
-    db
-      .prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'session_key_contract'")
-      .get(),
-  );
-  return !sessionNodeColumns.has("entry_valid") || !hasContractTable;
-}
-
-function hasPendingSessionProjectColumn(db: DatabaseSync): boolean {
-  const columns = readSqliteTableColumns(db, "session_nodes");
-  return Boolean(columns && !columns.has("project_id"));
 }
 
 function migrateMemoryChunkMetadataSchema(db: DatabaseSync): void {
@@ -575,10 +563,12 @@ function ensureAgentSchema(
   pathname: string,
   targetVersion = OPENCLAW_AGENT_SCHEMA_VERSION,
 ): void {
-  const schemaSql =
-    targetVersion < 18
-      ? withLegacySessionParticipantsSchema(OPENCLAW_AGENT_SCHEMA_SQL)
+  const memberSchemaSql =
+    targetVersion < 20
+      ? withLegacySessionMembersSchema(OPENCLAW_AGENT_SCHEMA_SQL)
       : OPENCLAW_AGENT_SCHEMA_SQL;
+  const schemaSql =
+    targetVersion < 18 ? withLegacySessionParticipantsSchema(memberSchemaSql) : memberSchemaSql;
   const identityMigration =
     targetVersion >= 18 &&
     readSqliteUserVersion(db) < targetVersion &&
@@ -610,7 +600,11 @@ function ensureAgentSchema(
         );
       }
       if (previousVersion === AGENT_MEDIA_SCHEMA_VERSION) {
-        const legacySql = withLegacySessionParticipantsSchema(OPENCLAW_AGENT_SCHEMA_SQL);
+        const legacySql = withLegacySessionParticipantsSchema(
+          readSqliteTableColumns(db, "session_members")?.has("identity_type")
+            ? OPENCLAW_AGENT_SCHEMA_SQL
+            : withLegacySessionMembersSchema(OPENCLAW_AGENT_SCHEMA_SQL),
+        );
         ensureSessionAdditiveColumns(db);
         verifyAndRepairCanonicalSqliteIndexes(db, pathname, legacySql, {
           validateAfterRepair: () => {
@@ -663,6 +657,9 @@ function ensureAgentSchema(
       ensureSessionEntryValidityProjection(db);
       if (targetVersion >= 18 && previousVersion < 18) {
         migrateSessionParticipantsSchema(db, pathname);
+      }
+      if (targetVersion >= 20 && previousVersion < 20) {
+        migrateSessionMembersSchema(db, pathname);
       }
       if (targetVersion >= 19) {
         migrateSessionCreatorNamespaces(db, previousVersion);

@@ -24,7 +24,11 @@ import { parseSessionLabel } from "../sessions/session-label.js";
 import { hasOperatorBoundary } from "./operator-role-policy.js";
 import type { GatewayClient } from "./server-methods/types.js";
 import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
-import { prepareSessionSharing } from "./session-sharing.js";
+import {
+  prepareSessionSharing,
+  resolveSessionSharingTarget,
+  resolveSessionVisibility,
+} from "./session-sharing.js";
 import { resolveSessionStoreKey } from "./session-store-key.js";
 import type { SessionListRowContext } from "./session-utils-contracts.js";
 import { resolveGatewaySessionDisplayName } from "./session-utils-display.js";
@@ -171,7 +175,18 @@ export async function resolveSessionKeyFromResolveParams(params: {
   p: SessionsResolveParams;
 }): Promise<SessionsResolveResult> {
   const { cfg, client, p } = params;
-  const { entryFilter } = prepareSessionSharing({ client, cfg });
+  const sharing = prepareSessionSharing({ client, cfg });
+  const entryFilter = (sessionKey: string, entry: SessionEntry) => {
+    if (resolveSessionVisibility(entry) !== "restricted") {
+      return sharing.entryFilter?.(sessionKey, entry) ?? true;
+    }
+    const target = resolveSessionSharingTarget({
+      cfg,
+      sessionKey,
+      ...(p.agentId ? { agentId: p.agentId } : {}),
+    });
+    return Boolean(target && sharing.canReadTarget(target));
+  };
 
   const key = normalizeOptionalString(p.key) ?? "";
   const hasKey = key.length > 0;
@@ -284,7 +299,8 @@ export async function resolveSessionKeyFromResolveParams(params: {
     const entry = store[target.canonicalKey];
     if (entry) {
       if (
-        (hasOperatorBoundary(client, cfg) && entryFilter?.(target.canonicalKey, entry) === false) ||
+        ((resolveSessionVisibility(entry) === "restricted" || hasOperatorBoundary(client, cfg)) &&
+          !entryFilter(target.canonicalKey, entry)) ||
         !isResolvedSessionKeyVisible({
           cfg,
           p,
@@ -468,7 +484,7 @@ export async function resolveSessionKeyFromResolveParams(params: {
   let rowContext: SessionListRowContext | undefined;
   const matches = filterAndSortSessionEntries({
     cfg,
-    ...(entryFilter ? { entryFilter } : {}),
+    entryFilter,
     store,
     now,
     getRowContext: () => (rowContext ??= buildSessionListRowMetadataContext({ now })),

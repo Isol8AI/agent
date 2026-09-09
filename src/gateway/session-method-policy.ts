@@ -6,12 +6,25 @@ const SESSION_TARGET_FIELDS_BY_METHOD = new Map<string, readonly SessionMutation
   ["skills.library.activate", ["sessionKey"]],
   ["agent", ["sessionKey"]],
   ["board.event", ["sessionKey"]],
+  ["board.data.read", ["sessionKey"]],
   ["board.update", ["sessionKey"]],
   ["board.widget.grant", ["sessionKey"]],
   ["board.widget.put", ["sessionKey"]],
   ["chat.abort", ["sessionKey"]],
   ["chat.inject", ["sessionKey"]],
   ["chat.send", ["sessionKey"]],
+  ["chat.history", ["sessionKey"]],
+  ["chat.startup", ["sessionKey"]],
+  ["chat.message.get", ["sessionKey"]],
+  ["chat.metadata", ["sessionKey"]],
+  ["controlUi.sessionPreview", ["sessionKey"]],
+  ["board.get", ["sessionKey"]],
+  ["board.widget.appView", ["sessionKey"]],
+  ["mcp.app.view", ["sessionKey"]],
+  ["mcp.app.listTools", ["sessionKey"]],
+  ["mcp.app.listResources", ["sessionKey"]],
+  ["mcp.app.listResourceTemplates", ["sessionKey"]],
+  ["mcp.app.readResource", ["sessionKey"]],
   ["mcp.app.callTool", ["sessionKey"]],
   ["mcp.app.updateModelContext", ["sessionKey"]],
   ["message.action", ["sessionKey"]],
@@ -20,6 +33,11 @@ const SESSION_TARGET_FIELDS_BY_METHOD = new Map<string, readonly SessionMutation
   ["progressCard.put", ["sessionKey"]],
   ["send", ["sessionKey"]],
   ["session.discussion.open", ["sessionKey"]],
+  ["session.discussion.info", ["sessionKey"]],
+  ["session.members.list", ["sessionKey"]],
+  ["session.members.listEvidence", ["sessionKey"]],
+  ["session.suggestions.list", ["sessionKey"]],
+  ["session.typing", ["sessionKey"]],
   ["sessions.abort", ["key"]],
   ["sessions.assignOwner", ["key"]],
   ["sessions.companion.ask", ["sessionKey"]],
@@ -27,14 +45,26 @@ const SESSION_TARGET_FIELDS_BY_METHOD = new Map<string, readonly SessionMutation
   ["sessions.companion.state", ["sessionKey"]],
   ["sessions.compaction.branch", ["key"]],
   ["sessions.compaction.restore", ["key"]],
+  ["sessions.compaction.list", ["key"]],
   ["sessions.compact", ["key"]],
   ["sessions.create", ["key", "parentSessionKey"]],
+  ["sessions.room.create", ["key", "parentSessionKey"]],
   ["sessions.delete", ["key"]],
   ["sessions.dispatch", ["key"]],
   ["sessions.files.set", ["sessionKey"]],
+  ["sessions.files.list", ["sessionKey"]],
+  ["sessions.files.get", ["sessionKey"]],
+  ["sessions.files.reveal", ["sessionKey"]],
+  ["sessions.diff", ["sessionKey"]],
   ["sessions.github.publish", ["sessionKey"]],
   ["sessions.github.confirm", ["sessionKey"]],
   ["sessions.fork", ["sessionKey"]],
+  ["sessions.get", ["key", "sessionKey"]],
+  ["sessions.describe", ["key"]],
+  ["sessions.preview", ["key"]],
+  ["sessions.messages.subscribe", ["key"]],
+  ["sessions.viewers.set", ["sessionKey"]],
+  ["sessions.branches.list", ["sessionKey"]],
   ["sessions.patch", ["key"]],
   ["sessions.goal.update", ["sessionKey"]],
   ["sessions.goal.clear", ["sessionKey"]],
@@ -45,6 +75,9 @@ const SESSION_TARGET_FIELDS_BY_METHOD = new Map<string, readonly SessionMutation
   ["sessions.rewind", ["sessionKey"]],
   ["sessions.send", ["key"]],
   ["sessions.steer", ["key"]],
+  ["sessions.usage", ["key"]],
+  ["sessions.usage.timeseries", ["key"]],
+  ["sessions.usage.logs", ["key"]],
   ["sessions.branches.switch", ["sessionKey"]],
   ...(
     [
@@ -118,8 +151,42 @@ const APPROVAL_SESSION_TARGET_METHODS = new Set([
 ]);
 
 const READ_ONLY_SESSION_TARGET_METHODS = new Set([
+  "artifacts.download",
+  "artifacts.get",
+  "artifacts.list",
+  "board.data.read",
+  "board.get",
+  "board.widget.appView",
+  "chat.history",
+  "chat.startup",
+  "chat.message.get",
+  "chat.metadata",
+  "controlUi.sessionPreview",
+  "mcp.app.view",
+  "mcp.app.listTools",
+  "mcp.app.listResources",
+  "mcp.app.listResourceTemplates",
+  "mcp.app.readResource",
+  "session.discussion.info",
+  "session.members.list",
+  "session.members.listEvidence",
+  "session.suggestions.list",
+  "sessions.branches.list",
   "sessions.companion.ask",
   "sessions.companion.state",
+  "sessions.compaction.list",
+  "sessions.describe",
+  "sessions.diff",
+  "sessions.files.get",
+  "sessions.files.list",
+  "sessions.files.reveal",
+  "sessions.get",
+  "sessions.messages.subscribe",
+  "sessions.preview",
+  "sessions.usage",
+  "sessions.usage.timeseries",
+  "sessions.usage.logs",
+  "sessions.viewers.set",
 ]);
 
 const LEGACY_PROFILE_INDEPENDENT_MUTATION_METHODS = new Set([
@@ -134,9 +201,11 @@ const LEGACY_PROFILE_INDEPENDENT_MUTATION_METHODS = new Set([
 ]);
 
 export function sessionMutationTargetFields(method: string): readonly SessionMutationTargetField[] {
-  return READ_ONLY_SESSION_TARGET_METHODS.has(method)
-    ? []
-    : (SESSION_TARGET_FIELDS_BY_METHOD.get(method) ?? []);
+  return SESSION_TARGET_FIELDS_BY_METHOD.get(method) ?? [];
+}
+
+export function isSessionReadAccessMethod(method: string): boolean {
+  return READ_ONLY_SESSION_TARGET_METHODS.has(method);
 }
 
 export function isRequiredSessionTargetMethod(method: string): boolean {

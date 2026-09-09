@@ -342,6 +342,7 @@ export async function prepareGatewayLifecycle(params: {
   runtimeState.controlUiSessionPullRequests = createControlUiSessionPullRequestSubscriptions({
     broadcastToConnIds,
     isConnectionActive,
+    canReadSession: runtime.canReadSession,
   });
   runtimeState.sessionViewerPresence = createSessionViewerPresenceDeclarations({
     clients,

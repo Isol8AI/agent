@@ -420,6 +420,7 @@ export function resolveGatewaySessionStoreTargetWithStore(
 /** Resolve one synchronous set of logical metadata targets using exact grouped reads. */
 export function resolveGatewaySessionStoreTargetsReadOnly(params: {
   cfg: OpenClawConfig;
+  projection?: "full" | "list";
   targets: readonly { key: string; agentId?: string }[];
 }): GatewaySessionStoreTargetWithStore[] {
   const targetDiscoveryCache: GatewaySessionStoreDiscoveryCache = new Map();
@@ -431,7 +432,7 @@ export function resolveGatewaySessionStoreTargetsReadOnly(params: {
       clone: false,
       readOnly: true,
       exactRead: true,
-      projection: "list",
+      projection: params.projection ?? "list",
       targetDiscoveryCache,
     };
     return { lookup, legacy: prepareExplicitDeletedLegacyMainStoreTarget(lookup) };

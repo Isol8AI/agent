@@ -32,6 +32,7 @@ type WatchedKeyState = {
 
 type SubscriptionDeps = {
   broadcastToConnIds: GatewayBroadcastToConnIdsFn;
+  canReadSession?: (connId: string, sessionKey: string) => boolean;
   isConnectionActive?: (connId: string) => boolean;
   load?: LoadSessionPullRequests;
   setTimer?: typeof globalThis.setTimeout;
@@ -39,6 +40,7 @@ type SubscriptionDeps = {
 };
 
 type ControlUiSessionPullRequestSubscriptions = {
+  authorize: (connId: string, sessionKeys: readonly string[]) => boolean;
   replace: (
     connId: string,
     sessionKeys: readonly string[],
@@ -148,6 +150,39 @@ export function createControlUiSessionPullRequestSubscriptions(
   let timer: ReturnType<typeof globalThis.setTimeout> | null = null;
   const scope = new AsyncWorkScope();
   let stopPromise: Promise<void> | undefined;
+  const canReadSession = (connId: string, sessionKey: string) =>
+    deps.canReadSession?.(connId, sessionKey) ?? true;
+  const authorize = (connId: string, sessionKeys: readonly string[]) =>
+    sessionKeys.every((sessionKey) => canReadSession(connId, sessionKey));
+
+  const removeConnectionKey = (connId: string, sessionKey: string) => {
+    const subscription = subscriptions.get(connId);
+    if (!subscription?.delete(sessionKey)) {
+      return;
+    }
+    const state = keyStates.get(sessionKey);
+    state?.connIds.delete(connId);
+    if (state?.connIds.size === 0) {
+      state.cacheLifetime.abort(null);
+      keyStates.delete(sessionKey);
+    }
+    if (subscription.size === 0) {
+      subscriptions.delete(connId);
+    }
+    if (subscriptions.size === 0 && timer !== null) {
+      clearTimer(timer);
+      timer = null;
+    }
+  };
+
+  const pruneUnauthorizedConnections = (sessionKey: string, state: WatchedKeyState): boolean => {
+    for (const connId of state.connIds) {
+      if (!canReadSession(connId, sessionKey)) {
+        removeConnectionKey(connId, sessionKey);
+      }
+    }
+    return keyStates.get(sessionKey) === state && state.connIds.size > 0;
+  };
 
   const removeMemberships = (
     connId: string,
@@ -172,7 +207,12 @@ export function createControlUiSessionPullRequestSubscriptions(
     refresh = false,
   ): Promise<ControlUiSessionPullRequestSnapshot> => {
     const state = keyStates.get(sessionKey);
-    if (scope.isClosing || !state || !isCurrent()) {
+    if (
+      scope.isClosing ||
+      !state ||
+      !pruneUnauthorizedConnections(sessionKey, state) ||
+      !isCurrent()
+    ) {
       return Promise.resolve(UNAVAILABLE_SNAPSHOT);
     }
     const pending = inflight.get(sessionKey);
@@ -190,14 +230,17 @@ export function createControlUiSessionPullRequestSubscriptions(
       limit(async () => {
         // Joiners retain their own watched-key lifetimes. A later force-only
         // watcher must not revive normal work retired while waiting for a slot.
-        if (!Array.from(demands).some((current) => current())) {
+        if (
+          !pruneUnauthorizedConnections(sessionKey, state) ||
+          !Array.from(demands).some((current) => current())
+        ) {
           return UNAVAILABLE_SNAPSHOT;
         }
         // Fresh result identity acknowledges forced loads even when the failure is unchanged.
         const snapshot = await load(loaderParams(sessionKey, refresh), state.cacheLifetime.signal)
           .then(pushedSnapshot)
           .catch(() => ({ ...UNAVAILABLE_SNAPSHOT }));
-        if (keyStates.get(sessionKey) === state) {
+        if (pruneUnauthorizedConnections(sessionKey, state)) {
           const hash = JSON.stringify(snapshot);
           const changed = state.hash !== hash;
           Object.assign(state, { hash, snapshot });
@@ -223,13 +266,25 @@ export function createControlUiSessionPullRequestSubscriptions(
     sessionKey: string,
     snapshot: ControlUiSessionPullRequestSnapshot,
   ) => {
-    if (connIds.size === 0) {
+    const authorizedConnIds = new Set<string>();
+    for (const connId of connIds) {
+      if (canReadSession(connId, sessionKey)) {
+        authorizedConnIds.add(connId);
+      } else {
+        removeConnectionKey(connId, sessionKey);
+      }
+    }
+    if (authorizedConnIds.size === 0) {
       return;
     }
     const sessions = Object.create(null) as ControlUiSessionPullRequestsChanged["sessions"];
     sessions[sessionKey] = snapshot;
-    deps.broadcastToConnIds(CONTROL_UI_SESSION_PULL_REQUESTS_CHANGED_EVENT, { sessions }, connIds);
-    for (const connId of connIds) {
+    deps.broadcastToConnIds(
+      CONTROL_UI_SESSION_PULL_REQUESTS_CHANGED_EVENT,
+      { sessions },
+      authorizedConnIds,
+    );
+    for (const connId of authorizedConnIds) {
       const watched = subscriptions.get(connId)?.get(sessionKey);
       if (watched) {
         watched.delivered = snapshot;
@@ -277,8 +332,11 @@ export function createControlUiSessionPullRequestSubscriptions(
         return;
       }
       const previousSubscription = subscriptions.get(normalizedConnId);
+      const authorizedSessionKeys = sessionKeys.filter((key) =>
+        canReadSession(normalizedConnId, key),
+      );
       const subscription = new Map(
-        sessionKeys.map((key) => [key, previousSubscription?.get(key) ?? {}]),
+        authorizedSessionKeys.map((key) => [key, previousSubscription?.get(key) ?? {}]),
       );
       if (subscription.size === 0) {
         unsubscribe(normalizedConnId);
@@ -305,7 +363,9 @@ export function createControlUiSessionPullRequestSubscriptions(
           if (!state) {
             return;
           }
-          const isCurrent = () => subscriptions.get(normalizedConnId)?.get(sessionKey) === watched;
+          const isCurrent = () =>
+            subscriptions.get(normalizedConnId)?.get(sessionKey) === watched &&
+            canReadSession(normalizedConnId, sessionKey);
           const refresh = refreshSessionKeys.has(sessionKey);
           const cached = refresh ? undefined : state.snapshot;
           // A shared cached snapshot does not prove this connection received it.
@@ -358,5 +418,5 @@ export function createControlUiSessionPullRequestSubscriptions(
     return stopPromise;
   };
 
-  return { replace, unsubscribe, pollNow, stop };
+  return { authorize, replace, unsubscribe, pollNow, stop };
 }

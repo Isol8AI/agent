@@ -1,3 +1,4 @@
+import type { SessionMemberIdentity } from "../../../packages/gateway-protocol/src/index.js";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -17,6 +18,8 @@ import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite
 type SessionMemberDatabase = Pick<OpenClawAgentKyselyDatabase, "session_members">;
 
 type SessionMember = {
+  identity: SessionMemberIdentity;
+  /** Legacy profile-only alias retained for existing callers. */
   identityId: string;
   addedBy: string;
   addedAt: number;
@@ -30,6 +33,36 @@ function resolveDatabaseOptions(scope: SessionAccessScope): OpenClawAgentDatabas
 
 function getSessionMemberKysely(database: Pick<OpenClawAgentDatabase, "db">) {
   return getNodeSqliteKysely<SessionMemberDatabase>(database.db);
+}
+
+function normalizeMemberIdentity(identity: SessionMemberIdentity | string): SessionMemberIdentity {
+  const resolved =
+    typeof identity === "string" ? { type: "profile" as const, id: identity.trim() } : identity;
+  const id = resolved.id.trim();
+  if ((resolved.type !== "profile" && resolved.type !== "agent") || !id) {
+    throw new Error("session member identity is required");
+  }
+  return { type: resolved.type, id };
+}
+
+function tryNormalizeMemberIdentity(
+  identity: SessionMemberIdentity | string,
+): SessionMemberIdentity | undefined {
+  try {
+    return normalizeMemberIdentity(identity);
+  } catch {
+    return undefined;
+  }
+}
+
+function rowMemberIdentity(row: {
+  identity_type: string;
+  identity_id: string;
+}): SessionMemberIdentity {
+  if (row.identity_type !== "profile" && row.identity_type !== "agent") {
+    throw new Error(`invalid session member identity type: ${row.identity_type}`);
+  }
+  return { type: row.identity_type, id: row.identity_id };
 }
 
 function readSessionMembers<T>(
@@ -50,10 +83,12 @@ export function listSessionMembers(scope: SessionAccessScope): SessionMember[] {
       database.db,
       db
         .selectFrom("session_members")
-        .select(["identity_id", "added_by", "added_at"])
+        .select(["identity_type", "identity_id", "added_by", "added_at"])
         .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
+        .orderBy("identity_type")
         .orderBy("identity_id"),
     ).rows.map((row) => ({
+      identity: rowMemberIdentity(row),
       identityId: row.identity_id,
       addedBy: row.added_by,
       addedAt: row.added_at,
@@ -64,11 +99,11 @@ export function listSessionMembers(scope: SessionAccessScope): SessionMember[] {
 export function listSessionMembershipKeys(
   scope: SessionAccessScope,
   sessionKeys: readonly string[],
-  identityId: string,
+  identity: SessionMemberIdentity | string,
 ): Set<string> {
-  const normalizedIdentityId = identityId.trim();
+  const normalizedIdentity = tryNormalizeMemberIdentity(identity);
   const normalizedSessionKeys = [...new Set(sessionKeys.map((key) => key.trim()).filter(Boolean))];
-  if (!normalizedIdentityId || normalizedSessionKeys.length === 0) {
+  if (!normalizedIdentity || normalizedSessionKeys.length === 0) {
     return new Set();
   }
   return readSessionMembers(scope, new Set<string>(), (database) => {
@@ -88,7 +123,8 @@ export function listSessionMembershipKeys(
         db
           .selectFrom("session_members")
           .select("session_key")
-          .where("identity_id", "=", normalizedIdentityId)
+          .where("identity_type", "=", normalizedIdentity.type)
+          .where("identity_id", "=", normalizedIdentity.id)
           .where("session_key", "in", chunk),
       ).rows;
       for (const row of rows) {
@@ -99,9 +135,12 @@ export function listSessionMembershipKeys(
   });
 }
 
-export function isSessionMember(scope: SessionAccessScope, identityId: string): boolean {
-  const normalizedIdentityId = identityId.trim();
-  if (!normalizedIdentityId) {
+export function isSessionMember(
+  scope: SessionAccessScope,
+  identity: SessionMemberIdentity | string,
+): boolean {
+  const normalizedIdentity = tryNormalizeMemberIdentity(identity);
+  if (!normalizedIdentity) {
     return false;
   }
   return readSessionMembers(scope, false, (database) => {
@@ -113,7 +152,8 @@ export function isSessionMember(scope: SessionAccessScope, identityId: string): 
           .selectFrom("session_members")
           .select("identity_id")
           .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
-          .where("identity_id", "=", normalizedIdentityId),
+          .where("identity_type", "=", normalizedIdentity.type)
+          .where("identity_id", "=", normalizedIdentity.id),
       ),
     );
   });
@@ -139,11 +179,21 @@ function assertAuthorizedSessionInstance(
 
 export function addSessionMember(
   scope: SessionAccessScope,
-  params: { identityId: string; addedBy: string; addedAt?: number; expectedSessionId?: string },
+  params: {
+    identity?: SessionMemberIdentity;
+    /** Legacy profile-only input. */
+    identityId?: string;
+    addedBy: string;
+    addedAt?: number;
+    expectedSessionId?: string;
+  },
 ): { member: SessionMember; inserted: boolean } {
-  const identityId = params.identityId.trim();
+  const identity = normalizeMemberIdentity(params.identity ?? params.identityId ?? "");
+  if (params.identity && params.identityId && params.identityId.trim() !== identity.id) {
+    throw new Error("session member identity aliases disagree");
+  }
   const addedBy = params.addedBy.trim();
-  if (!identityId || !addedBy) {
+  if (!addedBy) {
     throw new Error("session member identity and actor are required");
   }
   const options = resolveDatabaseOptions(scope);
@@ -161,25 +211,67 @@ export function addSessionMember(
         .insertInto("session_members")
         .values({
           session_key: resolveSqliteScope(scope).sessionKey,
-          identity_id: identityId,
+          identity_type: identity.type,
+          identity_id: identity.id,
           added_by: addedBy,
           added_at: addedAt,
         })
-        .onConflict((conflict) => conflict.columns(["session_key", "identity_id"]).doNothing()),
+        .onConflict((conflict) =>
+          conflict.columns(["session_key", "identity_type", "identity_id"]).doNothing(),
+        ),
     );
     return (result.numAffectedRows ?? 0n) > 0n;
   }, options);
-  return { member: { identityId, addedBy, addedAt }, inserted };
+  return { member: { identity, identityId: identity.id, addedBy, addedAt }, inserted };
+}
+
+/** Seeds a new room ACL inside the same transaction that publishes its session node. */
+export function addInitialSessionMembersInTransaction(
+  database: OpenClawAgentDatabase,
+  scope: SessionAccessScope,
+  params: {
+    identities: readonly SessionMemberIdentity[];
+    addedBy: string;
+    addedAt?: number;
+    expectedSessionId: string;
+  },
+): void {
+  const sessionKey = resolveSqliteScope(scope).sessionKey;
+  assertAuthorizedSessionInstance(database, sessionKey, params.expectedSessionId);
+  const addedBy = params.addedBy.trim();
+  if (!addedBy) {
+    throw new Error("session member actor is required");
+  }
+  const addedAt = params.addedAt ?? Date.now();
+  const db = getSessionMemberKysely(database);
+  for (const rawIdentity of params.identities) {
+    const identity = normalizeMemberIdentity(rawIdentity);
+    executeSqliteQuerySync(
+      database.db,
+      db
+        .insertInto("session_members")
+        .values({
+          session_key: sessionKey,
+          identity_type: identity.type,
+          identity_id: identity.id,
+          added_by: addedBy,
+          added_at: addedAt,
+        })
+        .onConflict((conflict) =>
+          conflict.columns(["session_key", "identity_type", "identity_id"]).doNothing(),
+        ),
+    );
+  }
 }
 
 export function removeSessionMember(
   scope: SessionAccessScope,
-  identityId: string,
+  identity: SessionMemberIdentity | string,
   expected?: Pick<SessionMember, "addedBy" | "addedAt">,
   expectedSessionId?: string,
 ): SessionMember | null {
-  const normalizedIdentityId = identityId.trim();
-  if (!normalizedIdentityId) {
+  const normalizedIdentity = tryNormalizeMemberIdentity(identity);
+  if (!normalizedIdentity) {
     return null;
   }
   const options = resolveDatabaseOptions(scope);
@@ -194,9 +286,10 @@ export function removeSessionMember(
       database.db,
       db
         .selectFrom("session_members")
-        .select(["identity_id", "added_by", "added_at"])
+        .select(["identity_type", "identity_id", "added_by", "added_at"])
         .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
-        .where("identity_id", "=", normalizedIdentityId),
+        .where("identity_type", "=", normalizedIdentity.type)
+        .where("identity_id", "=", normalizedIdentity.id),
     );
     if (
       !row ||
@@ -209,8 +302,14 @@ export function removeSessionMember(
       db
         .deleteFrom("session_members")
         .where("session_key", "=", resolveSqliteScope(scope).sessionKey)
-        .where("identity_id", "=", normalizedIdentityId),
+        .where("identity_type", "=", normalizedIdentity.type)
+        .where("identity_id", "=", normalizedIdentity.id),
     );
-    return { identityId: row.identity_id, addedBy: row.added_by, addedAt: row.added_at };
+    return {
+      identity: rowMemberIdentity(row),
+      identityId: row.identity_id,
+      addedBy: row.added_by,
+      addedAt: row.added_at,
+    };
   }, options);
 }

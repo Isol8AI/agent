@@ -16,7 +16,9 @@ import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   authorizeIncognitoSessionTarget,
   createSessionListEntryFilter,
+  prepareSessionSharing,
   resolveSessionSharingTarget,
+  resolveSessionVisibility,
 } from "../session-sharing.js";
 import {
   resolveSessionStoreAgentId,
@@ -181,11 +183,18 @@ export function resolveAuthorizedArtifactSession(
     sessionKey: query.sessionKey ?? resolved.sessionKey,
     target,
   });
-  const roleVisibilityDenied = Boolean(
-    cfg &&
-    hasOperatorBoundary(client, cfg) &&
+  const restrictedDenied = Boolean(
     target &&
-    createSessionListEntryFilter({ client, cfg })?.(target.storeKey, target.entry) === false,
+    resolveSessionVisibility(target.entry) === "restricted" &&
+    !prepareSessionSharing({ client, cfg: cfg ?? {} }).canReadTarget(target),
+  );
+  const roleVisibilityDenied = Boolean(
+    restrictedDenied ||
+    (cfg &&
+      hasOperatorBoundary(client, cfg) &&
+      target &&
+      resolveSessionVisibility(target.entry) !== "restricted" &&
+      createSessionListEntryFilter({ client, cfg })?.(target.storeKey, target.entry) === false),
   );
   if (!error && !roleVisibilityDenied) {
     return resolved;

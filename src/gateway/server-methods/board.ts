@@ -31,6 +31,7 @@ import {
   boardDataBindingCapability,
   captureBoardCapabilityAuthority,
   captureBoardRequestAuthority,
+  captureBoardSessionBearerAccess,
   readBoardDataBinding,
   respondBoardError,
   runBoardActionVerb,
@@ -185,8 +186,9 @@ export function createBoardHandlers(
               authority.assertActive();
             }
             authority.assertActive();
+            const access = captureBoardSessionBearerAccess(invocation, boardSession);
             const { ticket } = createBoardViewTicket({
-              agentId: boardSession.agentId,
+              ...(boardSession.agentId ? { agentId: boardSession.agentId } : {}),
               sessionKey: snapshot.sessionKey,
               name: widget.name,
               revision: widget.revision,
@@ -200,6 +202,7 @@ export function createBoardHandlers(
                   }
                 : {}),
               authority: authority.ticketAuthority,
+              ...(access ? { access } : {}),
             });
             if (registration) {
               widget.kindLabel = registration.definition.label;
@@ -514,8 +517,10 @@ export function createBoardHandlers(
     "board.widget.appView": defineValidatedGatewayMethod(
       "board.widget.appView",
       validateBoardWidgetAppViewParams,
-      async ({ params: boardParams, respond, context }) => {
+      async (invocation) => {
+        const { params: boardParams, respond, context } = invocation;
         try {
+          const authority = captureBoardRequestAuthority(invocation);
           const boardSession = resolveBoardSession(boardParams, context, respond);
           if (!boardSession) {
             return;
@@ -560,6 +565,7 @@ export function createBoardHandlers(
           if (!minted) {
             throw new Error("Pinned MCP App source is no longer available");
           }
+          authority.assertActive();
           respond(true, {
             viewId: minted.view.viewId,
             expiresAtMs: minted.view.expiresAtMs,

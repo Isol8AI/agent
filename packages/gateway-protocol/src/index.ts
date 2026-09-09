@@ -38,8 +38,11 @@ export * from "./schema/sessions-suggestions.js";
 export * from "./schema/sessions-delete.js";
 export * from "./schema/sessions-goal.js";
 export {
+  RoomKindSchema,
   SESSION_CREATE_IDEMPOTENCY_RETENTION_MS,
   SESSION_CREATE_RETRY_WINDOW_MS,
+  SessionsRoomCreateParamsSchema,
+  ThreadOriginSchema,
 } from "./schema/sessions-create.js";
 export { TASKS_LIST_CURSOR_MAX_LENGTH } from "./schema/tasks.js";
 export * from "./schema/projects.js";

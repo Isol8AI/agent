@@ -22,10 +22,10 @@ import {
   sessionDeliveryChannel,
   sessionDeliveryOrigin,
 } from "../../utils/delivery-context.shared.js";
+import { readGatewayAccessRevision } from "../gateway-access-revision.js";
 import { operatorSessionCap } from "../operator-role-policy.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
-import { createSessionListEntryFilter, isGatewayAdmin } from "../session-sharing.js";
-import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
+import { gatewayClientSessionMemberIdentity, isGatewayAdmin } from "../session-sharing.js";
 import { loadUsageStatusStaleWhileRevalidate } from "./models-auth-status-usage-cache.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import {
@@ -173,7 +173,7 @@ export const usageHandlers: GatewayRequestHandlers = {
     });
     respond(true, summary, undefined);
   },
-  "sessions.usage": async ({ respond, params, context, client }) => {
+  "sessions.usage": async ({ respond, params, context, client, sessionMutationAuthorization }) => {
     if (!assertValidParams(params, validateSessionsUsageParams, "sessions.usage", respond)) {
       return;
     }
@@ -186,12 +186,10 @@ export const usageHandlers: GatewayRequestHandlers = {
     const { interpretation: dateInterpretation, range } = dateRange;
     const config = context.getRuntimeConfig();
     const sessionCap = operatorSessionCap(client ?? null, config);
-    const visibilityFilter =
-      sessionCap === "none"
-        ? createSessionListEntryFilter({ client: client ?? null, cfg: config })
-        : undefined;
-    const profileId = gatewayClientSessionCreator(client ?? null)?.id;
-    const visibilityIdentity = sessionCap && profileId ? `${profileId}:${sessionCap}` : undefined;
+    const memberIdentity = gatewayClientSessionMemberIdentity(client ?? null);
+    const visibilityIdentityBase = isGatewayAdmin(client ?? null)
+      ? undefined
+      : `${memberIdentity?.type ?? "anonymous"}:${memberIdentity?.id ?? "none"}:${sessionCap ?? "default"}`;
     const { startMs, endMs, includeUntimestamped } = range;
     const dayBucket = resolveDayBucket(dateInterpretation);
     const limit = typeof p.limit === "number" && Number.isFinite(p.limit) ? p.limit : 50;
@@ -233,102 +231,127 @@ export const usageHandlers: GatewayRequestHandlers = {
     const groupingMode: UsageGroupingMode =
       p.groupBy === "family" || p.includeHistorical === true ? "family" : "instance";
 
-    let result: SessionsUsageResult;
-    try {
-      result = await loadSessionsUsageResultCached({
-        configRef: config,
-        ...(effectiveAgentId ? { agentId: effectiveAgentId } : { agentScope: "all" }),
-        startMs,
-        endMs,
-        includeUntimestamped,
-        dayBucket,
-        limit,
-        groupingMode,
-        specificKey,
-        includeContextWeight,
-        ...(visibilityIdentity ? { visibilityIdentity } : {}),
-        load: async () => {
-          const now = Date.now();
-          const mergedEntries = await selectUsageSessions({
-            config,
-            agentId: effectiveAgentId,
-            specificKey,
-            groupingMode,
-            startMs,
-            endMs,
-            visibilityFilter,
-          });
+    let result: SessionsUsageResult | undefined;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // Membership mutations advance this revision synchronously; bind both cache reuse and
+      // final delivery to one access epoch so a revoked caller cannot receive an older result.
+      const accessRevision = readGatewayAccessRevision();
+      try {
+        result = await loadSessionsUsageResultCached({
+          configRef: config,
+          ...(effectiveAgentId ? { agentId: effectiveAgentId } : { agentScope: "all" }),
+          startMs,
+          endMs,
+          includeUntimestamped,
+          dayBucket,
+          limit,
+          groupingMode,
+          specificKey,
+          includeContextWeight,
+          ...(visibilityIdentityBase
+            ? { visibilityIdentity: `${visibilityIdentityBase}:${accessRevision}` }
+            : {}),
+          load: async () => {
+            const now = Date.now();
+            const mergedEntries = await selectUsageSessions({
+              config,
+              agentId: effectiveAgentId,
+              specificKey,
+              groupingMode,
+              startMs,
+              endMs,
+              client: client ?? null,
+            });
 
-          // Load usage for each session
-          const sessions: SessionUsageEntry[] = [];
-          const accumulator = createUsageAggregateAccumulator();
-          const { summaries: usageByEntryIndex, cacheStatus } = await loadUsageSessionSummaries({
-            entries: mergedEntries,
-            config,
-            startMs,
-            endMs,
-            includeUntimestamped,
-            dayBucket,
-          });
+            // Load usage for each session
+            const sessions: SessionUsageEntry[] = [];
+            const accumulator = createUsageAggregateAccumulator();
+            const { summaries: usageByEntryIndex, cacheStatus } = await loadUsageSessionSummaries({
+              entries: mergedEntries,
+              config,
+              startMs,
+              endMs,
+              includeUntimestamped,
+              dayBucket,
+            });
 
-          for (const [entryIndex, merged] of mergedEntries.entries()) {
-            const agentId = merged.agentId;
-            const usage = usageByEntryIndex[entryIndex] ?? null;
-            const channel = sessionDeliveryChannel(merged.storeEntry);
-            const origin = sessionDeliveryOrigin(merged.storeEntry);
-            const chatType = merged.storeEntry?.chatType ?? origin?.chatType;
-            // Aggregate every matched row before limiting the visible list.
-            accumulator.add({ usage, agentId, channel });
+            for (const [entryIndex, merged] of mergedEntries.entries()) {
+              const agentId = merged.agentId;
+              const usage = usageByEntryIndex[entryIndex] ?? null;
+              const channel = sessionDeliveryChannel(merged.storeEntry);
+              const origin = sessionDeliveryOrigin(merged.storeEntry);
+              const chatType = merged.storeEntry?.chatType ?? origin?.chatType;
+              // Aggregate every matched row before limiting the visible list.
+              accumulator.add({ usage, agentId, channel });
 
-            if (entryIndex < limit) {
-              sessions.push({
-                key: merged.key,
-                label: merged.label,
-                sessionId: merged.sessionId,
-                scope: merged.scope ?? "instance",
-                sessionFamilyKey: merged.sessionFamilyKey,
-                currentSessionId: merged.currentSessionId,
-                includedSessionIds: merged.includedSessionIds,
-                historicalInstanceCount: merged.includedSessionIds?.length,
-                updatedAt: merged.updatedAt,
-                agentId,
-                channel,
-                chatType,
-                origin,
-                modelOverride: merged.storeEntry?.modelOverride,
-                providerOverride: merged.storeEntry?.providerOverride,
-                modelProvider: merged.storeEntry?.modelProvider,
-                model: merged.storeEntry?.model,
-                usage,
-                hasContextWeight: Boolean(merged.storeEntry?.systemPromptReport),
-                contextWeight: includeContextWeight
-                  ? (merged.storeEntry?.systemPromptReport ?? null)
-                  : undefined,
-              });
+              if (entryIndex < limit) {
+                sessions.push({
+                  key: merged.key,
+                  label: merged.label,
+                  sessionId: merged.sessionId,
+                  scope: merged.scope ?? "instance",
+                  sessionFamilyKey: merged.sessionFamilyKey,
+                  currentSessionId: merged.currentSessionId,
+                  includedSessionIds: merged.includedSessionIds,
+                  historicalInstanceCount: merged.includedSessionIds?.length,
+                  updatedAt: merged.updatedAt,
+                  agentId,
+                  channel,
+                  chatType,
+                  origin,
+                  modelOverride: merged.storeEntry?.modelOverride,
+                  providerOverride: merged.storeEntry?.providerOverride,
+                  modelProvider: merged.storeEntry?.modelProvider,
+                  model: merged.storeEntry?.model,
+                  usage,
+                  hasContextWeight: Boolean(merged.storeEntry?.systemPromptReport),
+                  contextWeight: includeContextWeight
+                    ? (merged.storeEntry?.systemPromptReport ?? null)
+                    : undefined,
+                });
+              }
             }
-          }
 
-          return {
-            updatedAt: now,
-            startDate: formatDateLabel(startMs, dateInterpretation),
-            endDate: formatDateLabel(endMs, dateInterpretation),
-            sessions,
-            totals: accumulator.totals,
-            aggregates: accumulator.finish(),
-            cacheStatus,
-          };
-        },
-      });
-    } catch (err) {
-      if (err instanceof UsageSessionInvalidRequestError) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, err.message));
-        return;
+            return {
+              updatedAt: now,
+              startDate: formatDateLabel(startMs, dateInterpretation),
+              endDate: formatDateLabel(endMs, dateInterpretation),
+              sessions,
+              totals: accumulator.totals,
+              aggregates: accumulator.finish(),
+              cacheStatus,
+            };
+          },
+        });
+      } catch (err) {
+        if (err instanceof UsageSessionInvalidRequestError) {
+          respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, err.message));
+          return;
+        }
+        throw err;
       }
-      throw err;
+      sessionMutationAuthorization?.assertCurrent();
+      if (!visibilityIdentityBase || accessRevision === readGatewayAccessRevision()) {
+        break;
+      }
+      result = undefined;
+    }
+    if (!result) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.UNAVAILABLE, "Session usage access changed while loading; retry."),
+      );
+      return;
     }
     respond(true, result, undefined);
   },
-  "sessions.usage.timeseries": async ({ respond, params, context }) => {
+  "sessions.usage.timeseries": async ({
+    respond,
+    params,
+    context,
+    sessionMutationAuthorization,
+  }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(
@@ -363,9 +386,10 @@ export const usageHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    sessionMutationAuthorization?.assertCurrent();
     respond(true, timeseries, undefined);
   },
-  "sessions.usage.logs": async ({ respond, params, context }) => {
+  "sessions.usage.logs": async ({ respond, params, context, sessionMutationAuthorization }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "key is required for logs"));
@@ -392,6 +416,7 @@ export const usageHandlers: GatewayRequestHandlers = {
       limit,
     });
 
+    sessionMutationAuthorization?.assertCurrent();
     respond(true, { logs: logs ?? [] }, undefined);
   },
 };

@@ -47,6 +47,8 @@ export type NodeEventContext = {
     sessionKey: string;
     terminal: boolean;
   }) => boolean;
+  /** Paired nodes have no room-member identity yet, so restricted targets fail closed. */
+  authorizeNodeSessionAccess?: (sessionKey: string) => boolean;
   updateNodePresenceActivity?: (params: {
     nodeId: string;
     connId?: string;

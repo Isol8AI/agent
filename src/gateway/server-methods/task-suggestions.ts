@@ -22,6 +22,7 @@ import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   authorizeSessionSharingTarget,
   createSessionListEntryFilter,
+  resolveSessionMutationAuthorization,
   resolveSessionSharingTarget,
 } from "../session-sharing.js";
 import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
@@ -233,10 +234,21 @@ async function sendSuggestedTaskPrompt(params: {
     queueMode: "steer" as const,
     idempotencyKey: `task-suggestion:${params.taskId}`,
   };
+  const authorization = resolveSessionMutationAuthorization({
+    client: params.options.client,
+    method: "chat.send",
+    requestParams: chatParams,
+    context: params.options.context,
+  });
+  if (authorization.error) {
+    return [false, undefined, authorization.error];
+  }
+  authorization.authorization?.assertCurrent();
   await handleChatSend({
     ...params.options,
     req: { ...params.options.req, method: "chat.send", params: chatParams },
     params: chatParams,
+    sessionMutationAuthorization: authorization.authorization,
     respond: (...args) => {
       response = args;
     },

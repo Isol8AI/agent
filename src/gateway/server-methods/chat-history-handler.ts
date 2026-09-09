@@ -41,7 +41,7 @@ import {
   tryResolveSessionCompatibilityOwnerAgentId,
 } from "../session-request-agent.js";
 import { hiddenSessionNotFound } from "../session-sharing-policy.js";
-import { prepareSessionSharing, resolveSessionVisibility } from "../session-sharing.js";
+import { resolveSessionVisibility } from "../session-sharing.js";
 import { capArrayByJsonBytes } from "../session-transcript-readers.js";
 import { SessionLookupUnavailableError } from "../session-utils-store-read.js";
 import {
@@ -53,6 +53,7 @@ import {
 } from "../session-utils.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { prepareSessionWorkspaceIcon } from "../workspace-icon-http.js";
+import { prepareChatHistoryAccess } from "./chat-history-access.js";
 import {
   CHAT_HISTORY_MAX_SINGLE_MESSAGE_BYTES,
   createChatHistoryByteCounter,
@@ -462,11 +463,9 @@ async function handleChatHistoryRequest({
     );
     return;
   }
-  const sharing = prepareSessionSharing({ client, cfg: currentSharingState?.cfg ?? cfg });
-  if (
-    sharingTarget &&
-    sharing.entryFilter?.(sharingTarget.storeKey, sharingTarget.entry) === false
-  ) {
+  const sharingCfg = currentSharingState?.cfg ?? cfg;
+  const sharing = prepareChatHistoryAccess(sharingCfg, client);
+  if (sharingTarget && !sharing.canReadTarget(sharingTarget)) {
     respond(false, undefined, hiddenSessionNotFound(canonicalKey));
     return;
   }

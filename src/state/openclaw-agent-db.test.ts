@@ -393,7 +393,8 @@ function downgradeCurrentAgentDatabaseToV13(databasePath: string): void {
         PRIMARY KEY (session_key, identity_id),
         FOREIGN KEY (session_key) REFERENCES session_entries(session_key) ON DELETE CASCADE
       ) STRICT;
-      INSERT INTO session_members_v13 SELECT * FROM session_members;
+      INSERT INTO session_members_v13 (session_key, identity_id, added_by, added_at)
+      SELECT session_key, identity_id, added_by, added_at FROM session_members;
       DROP TABLE session_members;
       ALTER TABLE session_members_v13 RENAME TO session_members;
       CREATE INDEX idx_agent_session_members_identity
@@ -1484,7 +1485,7 @@ describe("openclaw agent database", () => {
   });
 
   it("opens a v13 database that already contains additive board storage", async () => {
-    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(19);
+    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(20);
     const stateDir = createTempStateDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
     const databasePath = materializeV13WorkerAgentDatabase(stateDir);
@@ -1710,7 +1711,7 @@ describe("openclaw agent database", () => {
   });
 
   it("keeps additive heartbeat repair while upgrading schema version 12", async () => {
-    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(19);
+    expect(OPENCLAW_AGENT_SCHEMA_VERSION).toBe(20);
     const stateDir = createTempStateDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
     const databasePath = materializeV13WorkerAgentDatabase(stateDir);

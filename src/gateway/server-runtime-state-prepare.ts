@@ -500,6 +500,7 @@ export async function prepareGatewayKernelState(params: {
     sessionEventSubscribers,
     sessionMessageSubscribers,
     isConnectionActive,
+    canReadSession,
   } = connectionState;
 
   return {
@@ -581,5 +582,6 @@ export async function prepareGatewayKernelState(params: {
     sessionEventSubscribers,
     sessionMessageSubscribers,
     isConnectionActive,
+    canReadSession,
   };
 }

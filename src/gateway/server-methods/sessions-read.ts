@@ -1,15 +1,12 @@
 // Read-only session queries.
 import { performance } from "node:perf_hooks";
-import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { expectDefined } from "@openclaw/normalization-core";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   ErrorCodes,
   errorShape,
   type SessionsListParams,
   validateSessionsCleanupParams,
   validateSessionsListParams,
-  validateSessionsPreviewParams,
   validateSessionsResolveParams,
   validateSessionsSearchParams,
 } from "../../../packages/gateway-protocol/src/index.js";
@@ -38,29 +35,22 @@ import {
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
 import { hasOperatorBoundary } from "../operator-role-policy.js";
-import {
-  resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId,
-  tryResolveSessionCompatibilityOwnerAgentId,
-} from "../session-request-agent.js";
+import { createAuthorizedSessionListEntryFilter } from "../session-list-access.js";
+import { tryResolveSessionCompatibilityOwnerAgentId } from "../session-request-agent.js";
 import {
   canAccessIncognitoSession,
-  createSessionListEntryFilter,
+  gatewayClientSessionMemberIdentity,
   isGatewayAdmin,
   prepareSessionSharing,
   resolveSessionSharingTarget,
   resolveSessionVisibility,
 } from "../session-sharing.js";
 import { resolveSessionStoreAgentId } from "../session-store-key.js";
-import { readSessionPreviewItemsFromTranscript } from "../session-transcript-readers.js";
 import type { SessionListActiveRunProjector } from "../session-utils-contracts.js";
 import { projectGatewaySessionActiveRun } from "../session-utils-display.js";
 import {
   listSessionsFromStoreAsync,
   loadCombinedSessionStoreForGatewayCore,
-  resolveCanonicalSessionEntryFromStoreKeys,
-  resolveGatewaySessionStoreTargetWithStore,
-  type SessionsPreviewEntry,
-  type SessionsPreviewResult,
 } from "../session-utils.js";
 import { resolveSessionKeyFromResolveParams } from "../sessions-resolve.js";
 import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
@@ -71,6 +61,7 @@ import { resolveGatewayModelSelectionPolicy } from "./session-model-selection-po
 import { createSessionPlacementBatchProjector } from "./session-placement-read-projection.js";
 import { listFilter } from "./sessions-board-inventory.js";
 import { respondWithCachedSessionList } from "./sessions-list-cache.js";
+import { sessionsPreviewHandler } from "./sessions-preview.js";
 import { sessionByKeyReadHandlers } from "./sessions-read-by-key.js";
 import { resolveSessionSearchScope } from "./sessions-search-scope.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -95,22 +86,35 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const { agentId, configured, requestedAgentId, sessionKeys } = scope;
     const restrictIncognito =
       Boolean(gatewayClientSessionCreator(client)) && !isGatewayAdmin(client);
-    const roleVisibilityFilter = hasOperatorBoundary(client, cfg)
-      ? createSessionListEntryFilter({ client, cfg })
-      : undefined;
-    const restrictVisibility = restrictIncognito || Boolean(roleVisibilityFilter);
-    const canSearchSessionKey = (sessionKey: string) => {
+    const sharing = prepareSessionSharing({ client, cfg });
+    const roleVisibilityFilter = hasOperatorBoundary(client, cfg) ? sharing.entryFilter : undefined;
+    const restrictVisibility = restrictIncognito || !isGatewayAdmin(client);
+    const canSearchSessionKey = (sessionKey: string, sessionAgentId = agentId) => {
       if (
         isIncognitoSessionKey(sessionKey) &&
-        !canAccessIncognitoSession({ cfg, client: client ?? null, sessionKey, agentId })
+        !canAccessIncognitoSession({
+          cfg,
+          client: client ?? null,
+          sessionKey,
+          agentId: sessionAgentId,
+        })
       ) {
         return false;
       }
-      if (!roleVisibilityFilter) {
+      if (isGatewayAdmin(client)) {
         return true;
       }
-      const target = resolveSessionSharingTarget({ cfg, sessionKey, agentId });
-      return Boolean(target && roleVisibilityFilter(target.storeKey, target.entry));
+      const target = resolveSessionSharingTarget({
+        cfg,
+        sessionKey,
+        agentId: sessionAgentId,
+      });
+      return Boolean(
+        target &&
+        (resolveSessionVisibility(target.entry) === "restricted"
+          ? sharing.canReadTarget(target)
+          : (roleVisibilityFilter?.(target.storeKey, target.entry) ?? true)),
+      );
     };
     if (requestedAgentId && !params.sessionKeys && configured) {
       respond(
@@ -130,7 +134,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                 : resolveSessionStoreAgentId(cfg, sessionKey);
             return sessionAgentId === agentId;
           })
-    )?.filter(canSearchSessionKey);
+    )?.filter((sessionKey) => canSearchSessionKey(sessionKey));
     const searchTargets = configured
       ? [{ agentId, storePath: resolveSessionStorePathCore(cfg.session?.store, { agentId }) }]
       : resolveExistingAgentSessionStoreTargetsSync(cfg, agentId);
@@ -146,7 +150,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
             ? listSessionEntriesReadOnly({ agentId: target.agentId, storePath: target.storePath })
                 .map((entry) => entry.sessionKey)
                 .filter((sessionKey) => {
-                  if (!canSearchSessionKey(sessionKey)) {
+                  if (!canSearchSessionKey(sessionKey, target.agentId)) {
                     return false;
                   }
                   const parsed = parseAgentSessionKey(sessionKey);
@@ -204,6 +208,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const cfg = context.getRuntimeConfig();
     const configuredAgentsOnly = p.configuredAgentsOnly === true;
     const identityId = gatewayClientSessionCreator(client)?.id;
+    const memberIdentity = gatewayClientSessionMemberIdentity(client);
     const modelSelectionTarget = resolveGatewayModelSelectionPolicy({
       callerScopes: client?.connect?.scopes ?? [],
       cfg,
@@ -274,7 +279,18 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
             loaded = { ...loadedStore, modelCatalogByAgent: preparedModelCatalogByAgent };
           }
           const { targetsBySessionKey, durableStorePath, modelCatalogByAgent, storePath } = loaded;
-          const visibleEntryFilter = listFilter({ p, loaded, client, cfg, options });
+          const accessFilter = createAuthorizedSessionListEntryFilter({
+            cfg,
+            client,
+            store: loaded.store,
+            targetsBySessionKey,
+          });
+          const visibleEntryFilter = listFilter({
+            p,
+            loaded,
+            options,
+            accessFilter,
+          });
           const selectionRuns =
             p.activeOnly === true || p.search?.trim()
               ? createVisibleActiveSessionRunProjector(context)
@@ -361,7 +377,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                 },
               );
               const resolvedMembershipKeys = new Set<string>();
-              if (identityId && !isGatewayAdmin(client)) {
+              if (memberIdentity && !isGatewayAdmin(client)) {
                 const groups = new Map<
                   string,
                   {
@@ -395,7 +411,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                       storePath: group.storePath,
                     },
                     group.sessionKeys,
-                    identityId,
+                    memberIdentity,
                   )) {
                     resolvedMembershipKeys.add(
                       `${group.agentId}\0${group.storePath}\0${sessionKey}`,
@@ -465,9 +481,9 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
           );
           // Reapply current visibility and activity after awaits; selected work may
           // settle or change ownership while its row is projected.
-          const currentVisibilityFilter = sharing.entryFilter;
+          const restrictCurrentVisibility = !isGatewayAdmin(client);
           const visibleSessions =
-            currentVisibilityFilter || p.activeOnly === true
+            restrictCurrentVisibility || p.activeOnly === true
               ? result.sessions.filter((session, index) => {
                   const target = sharingTargets[index];
                   if (
@@ -478,10 +494,20 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                   ) {
                     return false;
                   }
-                  if (!currentVisibilityFilter) {
+                  if (!restrictCurrentVisibility) {
                     return true;
                   }
-                  return target ? currentVisibilityFilter(target.storeKey, target.entry) : false;
+                  if (!target) {
+                    return false;
+                  }
+                  return resolveSessionVisibility(target.entry) === "restricted"
+                    ? sharing.canReadTarget(
+                        target,
+                        membershipKeys.has(
+                          `${target.storeTarget.agentId}\0${target.storePath}\0${target.storeKey}`,
+                        ),
+                      )
+                    : (sharing.entryFilter?.(target.storeKey, target.entry) ?? true);
                 })
               : result.sessions;
           if (visibleSessions.length !== result.sessions.length) {
@@ -592,70 +618,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, formatErrorMessage(error)));
     }
   },
-  "sessions.preview": async ({ params, respond, context, client }) => {
-    if (!assertValidParams(params, validateSessionsPreviewParams, "sessions.preview", respond)) {
-      return;
-    }
-    const keys = (Array.isArray(params.keys) ? params.keys : [])
-      .map((key) => normalizeOptionalString(key ?? ""))
-      .filter((key): key is string => Boolean(key))
-      .slice(0, 64);
-    const limit = params.limit ?? 12;
-    const maxChars = params.maxChars ?? 240;
-
-    if (keys.length === 0) {
-      respond(true, { ts: Date.now(), previews: [] } satisfies SessionsPreviewResult, undefined);
-      return;
-    }
-
-    const cfg = context.getRuntimeConfig();
-    const roleVisibilityFilter = hasOperatorBoundary(client, cfg)
-      ? createSessionListEntryFilter({ client, cfg })
-      : undefined;
-    const previews: SessionsPreviewEntry[] = [];
-
-    for (const key of keys) {
-      if (previews.length > 0) {
-        await yieldToEventLoop();
-      }
-      const requestedAgent = resolveRequestedGlobalAgentId(cfg, key);
-      if (!requestedAgent.ok) {
-        respond(false, undefined, requestedAgent.error);
-        return;
-      }
-      try {
-        // Each preview resumes after a yield; read its canonical row from the current store.
-        const target = resolveGatewaySessionStoreTargetWithStore({
-          cfg,
-          key,
-          agentId: requestedAgent.agentId,
-          exactRead: true,
-          readOnly: true,
-        });
-        const entry = resolveCanonicalSessionEntryFromStoreKeys(target.store, target.storeKeys);
-        if (!entry?.sessionId || roleVisibilityFilter?.(target.canonicalKey, entry) === false) {
-          previews.push({ key, status: "missing", items: [] });
-          continue;
-        }
-        const items = readSessionPreviewItemsFromTranscript(
-          {
-            agentId: target.agentId,
-            sessionEntry: entry,
-            sessionId: entry.sessionId,
-            sessionKey: target.canonicalKey,
-            storePath: target.storePath,
-          },
-          limit,
-          maxChars,
-        );
-        previews.push({ key, status: items.length > 0 ? "ok" : "empty", items });
-      } catch {
-        previews.push({ key, status: "error", items: [] });
-      }
-    }
-
-    respond(true, { ts: Date.now(), previews } satisfies SessionsPreviewResult, undefined);
-  },
+  "sessions.preview": sessionsPreviewHandler,
   "sessions.resolve": async ({ params, respond, context, client }) => {
     if (!assertValidParams(params, validateSessionsResolveParams, "sessions.resolve", respond)) {
       return;

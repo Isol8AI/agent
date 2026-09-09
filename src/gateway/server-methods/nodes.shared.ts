@@ -18,6 +18,18 @@ export function respondPairingChanged(respond: RespondFn) {
   );
 }
 
+export function respondRestrictedNodeSession(respond: RespondFn) {
+  respond(
+    false,
+    undefined,
+    errorShape(
+      ErrorCodes.FORBIDDEN,
+      "paired nodes cannot access private rooms until node membership and isolation are active",
+      { details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } },
+    ),
+  );
+}
+
 export async function isNodePairingWorkCurrent(params: {
   nodeId: string;
   generation: NodePairingGeneration;

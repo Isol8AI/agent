@@ -7,11 +7,17 @@ import { HumanMentionsSchema } from "./human-mentions.js";
 import { ChatAttachmentsSchema } from "./logs-chat.js";
 import { PluginJsonValueSchema } from "./plugins.js";
 import { NonEmptyString, SessionLabelString } from "./primitives.js";
-import { SessionsCreateParamsSchema } from "./sessions-create.js";
+import { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema } from "./sessions-create.js";
 import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sessions-recover.js";
 import { SessionOwnerSchema } from "./sessions-row.js";
 
-export { SessionsCreateParamsSchema };
+export { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema };
+export {
+  RoomKindSchema,
+  ThreadOriginSchema,
+  type RoomKind,
+  type ThreadOrigin,
+} from "./sessions-room-values.js";
 export * from "./sessions-title.js";
 export * from "./sessions-goal.js";
 export { SessionsListParamsSchema, type SessionsListParams } from "./sessions-list.js";
@@ -835,6 +841,7 @@ export type SessionsBranchesSwitchParams = Static<typeof SessionsBranchesSwitchP
 export type SessionsBranchesSwitchResult = Static<typeof SessionsBranchesSwitchResultSchema>;
 export type SessionWorktreeInfo = Static<typeof SessionWorktreeInfoSchema>;
 export type SessionsCreateParams = Static<typeof SessionsCreateParamsSchema>;
+export type SessionsRoomCreateParams = Static<typeof SessionsRoomCreateParamsSchema>;
 export type SessionsCreateResult = Static<typeof SessionsCreateResultSchema>;
 export type SessionsRecoverParams = Static<typeof SessionsRecoverParamsSchema>;
 export type SessionsRecoverResult = Static<typeof SessionsRecoverResultSchema>;

@@ -300,6 +300,180 @@ describe("session sharing policy", () => {
     });
   });
 
+  it("requires explicit typed membership for restricted reads, subscriptions, files, tools, and mutations", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const cfg = rolePolicyConfig();
+      const owner = roleClient("write", "restricted-owner");
+      const writer = roleClient("write", "restricted-writer");
+      const sessionKey = "agent:main:restricted-room";
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey },
+        {
+          sessionId: "restricted-session",
+          updatedAt: 1,
+          visibility: "restricted",
+          roomKind: "group-dm",
+          sandbox: "required",
+          privateRoomExecutionPolicy: {
+            isolationSubject: { type: "session", sessionId: "restricted-session" },
+            sandbox: "required",
+            workspaceAccess: "none",
+            sessionRoot: "/tmp/restricted-session",
+            toolPolicyVersion: "private-room-v1",
+            allowedCapabilities: [],
+          },
+          createdActor: {
+            type: "human",
+            source: "profile",
+            id: owner.authenticatedUserProfile!.profileId,
+          },
+        },
+      );
+      const restrictedTarget = resolveSessionSharingTarget({ cfg, sessionKey });
+      expect(restrictedTarget).not.toBeNull();
+      if (!restrictedTarget) {
+        throw new Error("expected restricted target");
+      }
+      expect(resolveSessionSharingRole({ cfg, client: writer, target: restrictedTarget })).toBe(
+        "viewer",
+      );
+      expect(
+        authorizeSessionSharingTarget({ cfg, client: writer, target: restrictedTarget }),
+      ).toMatchObject({ details: { code: "SESSION_PARTICIPATION_REQUIRED" } });
+      expect(canReceiveSessionEvent({ cfg, client: writer, sessionKeys: [sessionKey] })).toBe(
+        false,
+      );
+      expect(
+        authorizeResolvedSessionMutation({
+          cfg,
+          client: writer,
+          sessionKey,
+          agentId: "main",
+        }),
+      ).toMatchObject({ details: { code: "SESSION_PARTICIPATION_REQUIRED" } });
+
+      const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
+      for (const [method, requestParams] of [
+        ["chat.history", { sessionKey }],
+        ["sessions.get", { key: sessionKey }],
+        ["sessions.messages.subscribe", { key: sessionKey }],
+        ["sessions.viewers.set", { sessionKeys: [sessionKey] }],
+        ["session.members.list", { sessionKey }],
+        ["artifacts.list", { sessionKey }],
+        ["artifacts.get", { sessionKey }],
+        ["artifacts.download", { sessionKey }],
+        ["board.data.read", { sessionKey }],
+        ["board.get", { sessionKey }],
+        ["board.widget.appView", { sessionKey }],
+        ["mcp.app.view", { sessionKey }],
+        ["mcp.app.listTools", { sessionKey }],
+        ["mcp.app.listResources", { sessionKey }],
+        ["mcp.app.listResourceTemplates", { sessionKey }],
+        ["mcp.app.readResource", { sessionKey }],
+        ["sessions.compaction.list", { key: sessionKey }],
+        ["sessions.usage", { key: sessionKey }],
+        ["sessions.usage.timeseries", { key: sessionKey }],
+        ["sessions.usage.logs", { key: sessionKey }],
+        ["sessions.files.get", { sessionKey }],
+        ["sessions.files.set", { sessionKey }],
+        ["session.typing", { sessionKey }],
+        ["board.update", { sessionKey }],
+        ["sessions.patch", { key: sessionKey }],
+        ["tools.invoke", { sessionKey }],
+        ["chat.send", { sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: writer, method, requestParams, context })
+            .error,
+          method,
+        ).toMatchObject({ details: { code: "SESSION_PARTICIPATION_REQUIRED" } });
+      }
+
+      addSessionMember(
+        { agentId: "main", sessionKey },
+        {
+          identity: { type: "profile", id: writer.authenticatedUserProfile!.profileId },
+          addedBy: owner.authenticatedUserProfile!.profileId,
+          expectedSessionId: "restricted-session",
+        },
+      );
+      expect(resolveSessionSharingRole({ cfg, client: writer, target: restrictedTarget })).toBe(
+        "member",
+      );
+      for (const [method, requestParams] of [
+        ["chat.history", { sessionKey }],
+        ["board.get", { sessionKey }],
+        ["board.widget.appView", { sessionKey }],
+        ["mcp.app.view", { sessionKey }],
+        ["mcp.app.listTools", { sessionKey }],
+        ["mcp.app.listResources", { sessionKey }],
+        ["mcp.app.listResourceTemplates", { sessionKey }],
+        ["mcp.app.readResource", { sessionKey }],
+        ["sessions.compaction.list", { key: sessionKey }],
+        ["sessions.usage", { key: sessionKey }],
+        ["sessions.usage.timeseries", { key: sessionKey }],
+        ["sessions.usage.logs", { key: sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: writer, method, requestParams, context })
+            .error,
+          method,
+        ).toBeNull();
+      }
+      expect(canReceiveSessionEvent({ cfg, client: writer, sessionKeys: [sessionKey] })).toBe(true);
+      expect(
+        authorizeResolvedSessionMutation({
+          cfg,
+          client: writer,
+          sessionKey,
+          agentId: "main",
+        }),
+      ).toMatchObject({ details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } });
+      for (const [method, requestParams] of [
+        ["tools.invoke", { sessionKey }],
+        ["sessions.files.get", { sessionKey }],
+        ["sessions.companion.ask", { sessionKey }],
+        ["sessions.diff", { sessionKey }],
+        ["mcp.app.callTool", { sessionKey }],
+        ["plugins.sessionAction", { sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: writer, method, requestParams, context })
+            .error,
+          method,
+        ).toMatchObject({ details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } });
+      }
+
+      const agent = client({});
+      agent.internal = {
+        operatorRoleActor: { kind: "system" },
+        agentRuntimeIdentity: { agentId: "same-id" } as never,
+      };
+      addSessionMember(
+        { agentId: "main", sessionKey },
+        {
+          identity: { type: "profile", id: "same-id" },
+          addedBy: owner.authenticatedUserProfile!.profileId,
+          expectedSessionId: "restricted-session",
+        },
+      );
+      expect(resolveSessionSharingRole({ cfg, client: agent, target: restrictedTarget })).toBe(
+        "viewer",
+      );
+      addSessionMember(
+        { agentId: "main", sessionKey },
+        {
+          identity: { type: "agent", id: "same-id" },
+          addedBy: owner.authenticatedUserProfile!.profileId,
+          expectedSessionId: "restricted-session",
+        },
+      );
+      expect(resolveSessionSharingRole({ cfg, client: agent, target: restrictedTarget })).toBe(
+        "member",
+      );
+    });
+  });
+
   it("hides foreign cron sessions with none access across listings, reads, mutations, and broadcasts", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const cfg = rolePolicyConfig();

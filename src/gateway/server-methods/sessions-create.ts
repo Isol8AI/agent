@@ -48,11 +48,12 @@ import { chatHandlers } from "./chat.js";
 import { resolveRegisteredCatalogCreateTarget } from "./session-catalog.js";
 import { emitSessionsChanged } from "./session-change-event.js";
 import { registerCreatedSessionCategory } from "./session-create-category.js";
-import { idempotentSessionCreate } from "./session-create-idempotency.js";
+import { finalizeSessionCreateHandlers } from "./session-create-idempotency.js";
 import {
   resolveSessionCreateInitialTurn,
   isFreshChatSendStarted,
 } from "./session-create-initial-turn.js";
+import * as privateRoomCreate from "./session-create-private-room.js";
 import {
   normalizeSessionProjectGitUrl,
   prepareSessionRepositoryWorkspace,
@@ -83,6 +84,10 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
+    const hasRestrictedRoomContract = privateRoomCreate.validate(p, respond);
+    if (hasRestrictedRoomContract === null) {
+      return;
+    }
     const parentSessionKey = normalizeOptionalString(p.parentSessionKey);
     const sessionCreation = prepareSkillLibrarySessionCreation(
       client,
@@ -188,6 +193,9 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       hasInitialTurn,
       message: initialMessage,
     } = initialTurn;
+    if (!privateRoomCreate.allowsInitialTurn(hasRestrictedRoomContract, hasInitialTurn, respond)) {
+      return;
+    }
     const repositoryCreation = resolveSessionRepositoryCreation(p, hasInitialTurn);
     if (!repositoryCreation.ok) {
       respond(false, undefined, repositoryCreation.error);
@@ -571,7 +579,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       ...(client?.internal?.operatorRoleActor
         ? { operatorRoleActor: client.internal.operatorRoleActor }
         : {}),
-      visibility: p.visibility,
+      ...privateRoomCreate.protocolFields(p),
       allowExistingModelSelection,
       parentSessionKey,
       spawnDepth: p.spawnDepth,
@@ -584,8 +592,8 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
                 : {}),
             }
           : undefined,
-      spawnedCwd: p.worktree === true ? undefined : sessionCwd,
-      sessionRoot: p.worktree === true ? undefined : sessionRoot,
+      spawnedCwd: p.worktree === true || hasRestrictedRoomContract ? undefined : sessionCwd,
+      sessionRoot: p.worktree === true || hasRestrictedRoomContract ? undefined : sessionRoot,
       permissionMode: p.permissionMode,
       ...(p.toolOverrides !== undefined ? { toolOverrides: p.toolOverrides } : {}),
       prepareLifecycle,
@@ -607,7 +615,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       commandSource: "webchat",
       creation: sessionCreation,
       authorizedPluginId: normalizeOptionalString(client?.internal?.pluginRuntimeOwnerId),
-      armSessionDiffBaselineCapture: !repository,
+      armSessionDiffBaselineCapture: !repository && !hasRestrictedRoomContract,
       loadGatewayModelCatalog: () =>
         context.loadGatewayModelCatalog({ agentId: modelCatalogAgentId }),
       commitGuard,
@@ -707,6 +715,4 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
   },
 };
 
-sessionCreateHandlers["sessions.create"] = idempotentSessionCreate(
-  expectDefined(sessionCreateHandlers["sessions.create"], "sessions.create handler"),
-);
+finalizeSessionCreateHandlers(sessionCreateHandlers);

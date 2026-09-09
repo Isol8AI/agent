@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SESSION_CREATE_IDEMPOTENCY_RETENTION_MS } from "../../../packages/gateway-protocol/src/index.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { DEDUPE_MAX } from "../server-constants.js";
-import { idempotentSessionCreate } from "./session-create-idempotency.js";
+import { finalizeSessionCreateHandlers } from "./session-create-idempotency.js";
 import type {
   GatewayRequestContext,
   GatewayRequestHandler,
+  GatewayRequestHandlers,
   GatewayRequestHandlerOptions,
   RespondFn,
 } from "./types.js";
@@ -22,7 +23,9 @@ function createFixture(handler?: GatewayRequestHandler) {
         request.respond(true, { key: `agent:main:${String(request.params.idempotencyKey)}` });
       }),
   );
-  const wrapped = idempotentSessionCreate(execute);
+  const handlers = { "sessions.create": execute } as GatewayRequestHandlers;
+  finalizeSessionCreateHandlers(handlers);
+  const wrapped = handlers["sessions.create"]!;
   const client = {
     authenticatedUserId: "owner",
     connect: {

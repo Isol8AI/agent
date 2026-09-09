@@ -3,6 +3,7 @@ import {
   SESSION_CREATE_IDEMPOTENCY_RETENTION_MS,
   SESSION_CREATE_RETRY_WINDOW_MS,
   validateSessionsCreateParams,
+  validateSessionsRoomCreateParams,
 } from "../index.js";
 
 describe("sessions.create schema", () => {
@@ -41,9 +42,44 @@ describe("sessions.create schema", () => {
   });
 
   it("accepts additive create-time visibility values", () => {
-    for (const visibility of ["shared", "read-only", "suggest", "draft"]) {
+    for (const visibility of ["shared", "read-only", "suggest", "draft", "restricted"]) {
       expect(validateSessionsCreateParams({ agentId: "main", visibility })).toBe(true);
     }
+  });
+
+  it("requires typed membership and immutable room metadata for atomic room creation", () => {
+    expect(
+      validateSessionsRoomCreateParams({
+        agentId: "main",
+        visibility: "restricted",
+        roomKind: "group-dm",
+        members: [
+          { type: "profile", id: "profile-alice" },
+          { type: "agent", id: "researcher" },
+        ],
+      }),
+    ).toBe(true);
+    expect(
+      validateSessionsRoomCreateParams({
+        agentId: "main",
+        visibility: "restricted",
+        roomKind: "thread",
+        members: [],
+        parentSessionKey: "agent:main:private-room",
+        threadOrigin: {
+          parentRoomKey: "agent:main:private-room",
+          originRootMessageId: "message-1",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      validateSessionsRoomCreateParams({
+        agentId: "main",
+        visibility: "shared",
+        roomKind: "channel",
+        members: [],
+      }),
+    ).toBe(false);
   });
 
   it("rejects unknown visibility values", () => {
