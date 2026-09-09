@@ -481,13 +481,7 @@ export function authorizeSessionReadTarget(params: {
   );
   const readable =
     role === "admin" || role === "owner" || (sessionCap !== "none" && role === "member");
-  return readable
-    ? null
-    : authorizeSessionSharingTarget({
-        cfg: params.cfg,
-        client: params.client,
-        target: params.target,
-      });
+  return readable ? null : hiddenSessionNotFound(params.target.canonicalKey);
 }
 
 export function canReadSessionSharingTarget(

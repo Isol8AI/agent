@@ -297,9 +297,6 @@ export function resolveSessionMutationAuthorization(params: {
       getCfg,
     });
   if (!targetRefs) {
-    if (isGatewayAdmin(params.client)) {
-      return { error: null };
-    }
     if (isRequiredSessionTargetMethod(params.method)) {
       return {
         error: errorShape(ErrorCodes.INVALID_REQUEST, "session mutation target is unavailable", {
@@ -602,11 +599,7 @@ export function canReceiveSessionEvent(params: {
   const operatorActor = resolveGatewayOperatorRoleActor(client);
   const identity = sharingIdentity(client, operatorActor);
   if (!identity) {
-    return (
-      (!cfg.gateway?.roles || operatorActor?.kind === "system") &&
-      event !== "session.suggestion" &&
-      event !== "session.typing"
-    );
+    return false;
   }
   const hidesForeignSessions = operatorSessionCap(client, cfg) === "none";
   const sharing = prepareSessionSharing({ cfg, client });
