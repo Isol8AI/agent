@@ -4796,6 +4796,7 @@ export const en: TranslationMap & {
       current: "Session visibility: {visibility}",
       visibility: "Visibility",
       shared: "Shared",
+      restricted: "Restricted",
       readOnly: "Read-only",
       suggest: "Suggest",
       draft: "Draft",

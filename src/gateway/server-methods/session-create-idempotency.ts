@@ -31,7 +31,7 @@ const sessionCreatesByContext = new WeakMap<
   Map<string, Map<string, SessionCreateEntry>>
 >();
 
-export function idempotentSessionCreate(handler: GatewayRequestHandler): GatewayRequestHandler {
+function idempotentSessionCreate(handler: GatewayRequestHandler): GatewayRequestHandler {
   return async (request) => {
     const idempotencyKey = request.params.idempotencyKey;
     if (typeof idempotencyKey !== "string" || !idempotencyKey) {
