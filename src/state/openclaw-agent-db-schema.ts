@@ -600,8 +600,13 @@ function ensureAgentSchema(
         );
       }
       if (previousVersion === AGENT_MEDIA_SCHEMA_VERSION) {
+        const existingMembersAreLegacy = !readSqliteTableColumns(db, "session_members")?.has(
+          "identity_type",
+        );
         const legacySql = withLegacySessionParticipantsSchema(
-          withLegacySessionMembersSchema(OPENCLAW_AGENT_SCHEMA_SQL),
+          existingMembersAreLegacy
+            ? withLegacySessionMembersSchema(OPENCLAW_AGENT_SCHEMA_SQL)
+            : OPENCLAW_AGENT_SCHEMA_SQL,
         );
         ensureSessionAdditiveColumns(db);
         verifyAndRepairCanonicalSqliteIndexes(db, pathname, legacySql, {

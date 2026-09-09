@@ -33,6 +33,7 @@ import {
 import { withLegacySessionParticipantsSchema } from "../state/openclaw-agent-participants-migration.js";
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "../state/openclaw-agent-schema.js";
 import { withLegacySessionMembersSchema } from "../state/openclaw-agent-session-members-migration.js";
+import { tableHasColumn } from "../state/openclaw-state-db-schema-helpers.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../state/openclaw-state-db.js";
 import { VERSION } from "../version.js";
 import { formatErrorMessage } from "./errors.js";
@@ -404,7 +405,7 @@ function migrateAgentDatabase(params: {
     }
     const schemaMode = userVersion < OPENCLAW_AGENT_SCHEMA_VERSION ? "legacy" : "current";
     const memberSchemaSql =
-      userVersion < 20
+      userVersion < 20 && !tableHasColumn(database, "session_members", "identity_type")
         ? withLegacySessionMembersSchema(OPENCLAW_AGENT_SCHEMA_SQL)
         : OPENCLAW_AGENT_SCHEMA_SQL;
     const schemaSql =
