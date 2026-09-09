@@ -24,8 +24,10 @@ import {
 } from "../../utils/delivery-context.shared.js";
 import { operatorSessionCap } from "../operator-role-policy.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
-import { createSessionListEntryFilter, isGatewayAdmin } from "../session-sharing.js";
-import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
+import {
+  gatewayClientSessionMemberIdentity,
+  isGatewayAdmin,
+} from "../session-sharing.js";
 import { loadUsageStatusStaleWhileRevalidate } from "./models-auth-status-usage-cache.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 import {
@@ -186,12 +188,10 @@ export const usageHandlers: GatewayRequestHandlers = {
     const { interpretation: dateInterpretation, range } = dateRange;
     const config = context.getRuntimeConfig();
     const sessionCap = operatorSessionCap(client ?? null, config);
-    const visibilityFilter =
-      sessionCap === "none"
-        ? createSessionListEntryFilter({ client: client ?? null, cfg: config })
-        : undefined;
-    const profileId = gatewayClientSessionCreator(client ?? null)?.id;
-    const visibilityIdentity = sessionCap && profileId ? `${profileId}:${sessionCap}` : undefined;
+    const memberIdentity = gatewayClientSessionMemberIdentity(client ?? null);
+    const visibilityIdentity = isGatewayAdmin(client ?? null)
+      ? undefined
+      : `${memberIdentity?.type ?? "anonymous"}:${memberIdentity?.id ?? "none"}:${sessionCap ?? "default"}`;
     const { startMs, endMs, includeUntimestamped } = range;
     const dayBucket = resolveDayBucket(dateInterpretation);
     const limit = typeof p.limit === "number" && Number.isFinite(p.limit) ? p.limit : 50;
@@ -256,7 +256,7 @@ export const usageHandlers: GatewayRequestHandlers = {
             groupingMode,
             startMs,
             endMs,
-            visibilityFilter,
+            client: client ?? null,
           });
 
           // Load usage for each session
@@ -328,7 +328,12 @@ export const usageHandlers: GatewayRequestHandlers = {
     }
     respond(true, result, undefined);
   },
-  "sessions.usage.timeseries": async ({ respond, params, context }) => {
+  "sessions.usage.timeseries": async ({
+    respond,
+    params,
+    context,
+    sessionMutationAuthorization,
+  }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(
@@ -363,9 +368,15 @@ export const usageHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    sessionMutationAuthorization?.assertCurrent();
     respond(true, timeseries, undefined);
   },
-  "sessions.usage.logs": async ({ respond, params, context }) => {
+  "sessions.usage.logs": async ({
+    respond,
+    params,
+    context,
+    sessionMutationAuthorization,
+  }) => {
     const key = normalizeOptionalString(params?.key) ?? null;
     if (!key) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "key is required for logs"));
@@ -392,6 +403,7 @@ export const usageHandlers: GatewayRequestHandlers = {
       limit,
     });
 
+    sessionMutationAuthorization?.assertCurrent();
     respond(true, { logs: logs ?? [] }, undefined);
   },
 };

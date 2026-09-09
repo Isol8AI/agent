@@ -75,6 +75,10 @@ import {
   readSessionMessagesWithSourceAsync,
 } from "./session-transcript-readers.js";
 import { loadGatewaySessionEntryReadOnly } from "./session-utils.js";
+import {
+  canUseSessionBearerAccess,
+  type SessionBearerAccessBinding,
+} from "./session-bearer-access.js";
 
 const OUTGOING_IMAGE_ROUTE_PREFIX = "/api/chat/media/outgoing";
 const DEFAULT_TRANSIENT_OUTGOING_IMAGE_TTL_MS = 15 * 60 * 1000;
@@ -184,6 +188,7 @@ type ManagedOutgoingImageTicketPayload = {
   attachmentId: string;
   variant: "full";
   exp: number;
+  access?: SessionBearerAccessBinding;
 };
 
 export type ManagedOutgoingMediaArtifactDownload = {
@@ -530,6 +535,7 @@ function createManagedOutgoingImageTicket(params: {
   sessionKey: string;
   attachmentId: string;
   nowMs?: number;
+  access?: SessionBearerAccessBinding;
 }): { ticket: string; expiresAt: string } | null {
   const now = asDateTimestampMs(params.nowMs ?? Date.now());
   if (now === undefined) {
@@ -545,6 +551,7 @@ function createManagedOutgoingImageTicket(params: {
     attachmentId: params.attachmentId,
     variant: "full",
     exp,
+    ...(params.access ? { access: params.access } : {}),
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   const signature = signManagedOutgoingImageTicketPayload(encodedPayload);
@@ -559,21 +566,21 @@ function verifyManagedOutgoingImageTicket(params: {
   sessionKey: string;
   attachmentId: string;
   nowMs?: number;
-}): boolean {
+}): ManagedOutgoingImageTicketPayload | undefined {
   const now = asDateTimestampMs(params.nowMs ?? Date.now());
   if (now === undefined) {
-    return false;
+    return undefined;
   }
   const parts = params.ticket?.split(".");
   if (!parts || parts.length !== 3 || parts[0] !== "v1") {
-    return false;
+    return undefined;
   }
   const [, encodedPayload, signature] = parts;
   if (!encodedPayload || !signature) {
-    return false;
+    return undefined;
   }
   if (!safeEqualSecret(signature, signManagedOutgoingImageTicketPayload(encodedPayload))) {
-    return false;
+    return undefined;
   }
   try {
     const payload = JSON.parse(
@@ -587,9 +594,11 @@ function verifyManagedOutgoingImageTicket(params: {
       typeof payload.exp === "number" &&
       Number.isFinite(payload.exp) &&
       payload.exp >= now
-    );
+    )
+      ? (payload as ManagedOutgoingImageTicketPayload)
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -1186,6 +1195,7 @@ async function recordMatchesTranscriptMessage(
 async function resolveManagedOutgoingMediaArtifactDownloadForRecord(
   record: ManagedImageRecord,
   stateDir?: string,
+  access?: SessionBearerAccessBinding,
 ): Promise<ManagedOutgoingMediaArtifactDownload | null> {
   if (
     (await recordMatchesTranscriptMessage(record, undefined, undefined, undefined, stateDir)) !==
@@ -1200,6 +1210,7 @@ async function resolveManagedOutgoingMediaArtifactDownloadForRecord(
   const ticket = createManagedOutgoingImageTicket({
     sessionKey: record.sessionKey,
     attachmentId: record.attachmentId,
+    access,
   });
   if (!ticket) {
     return null;
@@ -1233,6 +1244,7 @@ export async function resolveManagedOutgoingMediaArtifactDownload(params: {
   defaultAgentId?: string;
   artifactId: string;
   stateDir?: string;
+  access?: SessionBearerAccessBinding;
 }): Promise<ManagedOutgoingMediaArtifactDownload | null> {
   const parsed = parseManagedOutgoingArtifactId(params.artifactId);
   if (!parsed) {
@@ -1255,7 +1267,11 @@ export async function resolveManagedOutgoingMediaArtifactDownload(params: {
   if (!kind || (parsed.family === "image") !== (kind === "image")) {
     return null;
   }
-  return await resolveManagedOutgoingMediaArtifactDownloadForRecord(record, params.stateDir);
+  return await resolveManagedOutgoingMediaArtifactDownloadForRecord(
+    record,
+    params.stateDir,
+    params.access,
+  );
 }
 
 /** Upgrade legacy managed-image URLs that predate stable artifact ids. */
@@ -1263,6 +1279,7 @@ export async function resolveManagedOutgoingMediaUrlDownload(params: {
   sessionKey: string;
   url: string;
   stateDir?: string;
+  access?: SessionBearerAccessBinding;
 }): Promise<ManagedOutgoingMediaArtifactDownload | null> {
   const parsed = parseManagedOutgoingRoute(params.url);
   if (!parsed || parsed.sessionKey !== params.sessionKey) {
@@ -1272,7 +1289,11 @@ export async function resolveManagedOutgoingMediaUrlDownload(params: {
   if (!record || record.sessionKey !== params.sessionKey) {
     return null;
   }
-  return await resolveManagedOutgoingMediaArtifactDownloadForRecord(record, params.stateDir);
+  return await resolveManagedOutgoingMediaArtifactDownloadForRecord(
+    record,
+    params.stateDir,
+    params.access,
+  );
 }
 
 export function attachManagedOutgoingMediaToMessage(params: {
@@ -1636,11 +1657,12 @@ export async function handleManagedOutgoingMediaHttpRequest(
     sendStatus(res, 404, "not found");
     return true;
   }
-  const hasValidMediaTicket = verifyManagedOutgoingImageTicket({
+  const mediaTicket = verifyManagedOutgoingImageTicket({
     ticket: requestUrl.searchParams.get("mediaTicket"),
     sessionKey,
     attachmentId,
   });
+  const hasValidMediaTicket = Boolean(mediaTicket);
   if (!hasValidMediaTicket) {
     const requestAuth = await authorizeGatewayHttpRequestOrReply({
       req,
@@ -1680,6 +1702,18 @@ export async function handleManagedOutgoingMediaHttpRequest(
     sendStatus(res, 404, "not found");
     return true;
   }
+  const canUseMediaTicket = () =>
+    !mediaTicket ||
+    canUseSessionBearerAccess({
+      cfg: getRuntimeConfig(),
+      sessionKey,
+      ...(record.agentId ? { agentId: record.agentId } : {}),
+      ...(mediaTicket.access ? { binding: mediaTicket.access } : {}),
+    });
+  if (!canUseMediaTicket()) {
+    sendStatus(res, 401, "unauthorized");
+    return true;
+  }
   if (
     (await recordMatchesTranscriptMessage(record, undefined, undefined, undefined, stateDir)) !==
     "match"
@@ -1709,6 +1743,10 @@ export async function handleManagedOutgoingMediaHttpRequest(
   if (variant === "thumbnail") {
     if (mediaKind !== "image") {
       await opened.handle.close();
+      if (!canUseMediaTicket()) {
+        sendStatus(res, 401, "unauthorized");
+        return true;
+      }
       sendStatus(res, 404, "not found");
       return true;
     }
@@ -1727,6 +1765,10 @@ export async function handleManagedOutgoingMediaHttpRequest(
         ).data;
       });
       await opened.handle.close();
+      if (!canUseMediaTicket()) {
+        sendStatus(res, 401, "unauthorized");
+        return true;
+      }
       const sourceName = path.parse(responseFilename ?? "generated-image").name;
       res.statusCode = 200;
       res.setHeader("content-type", "image/png");
@@ -1736,7 +1778,7 @@ export async function handleManagedOutgoingMediaHttpRequest(
       res.setHeader(
         "cache-control",
         hasValidMediaTicket
-          ? `private, max-age=${MANAGED_OUTGOING_IMAGE_TICKET_TTL_MS / 1000}, immutable`
+          ? "private, no-store"
           : "private, max-age=31536000, immutable",
       );
       res.setHeader(
@@ -1794,7 +1836,7 @@ export async function handleManagedOutgoingMediaHttpRequest(
     isPlayback
       ? "private, no-cache"
       : hasValidMediaTicket
-        ? `private, max-age=${MANAGED_OUTGOING_IMAGE_TICKET_TTL_MS / 1000}, immutable`
+        ? "private, no-store"
         : "private, max-age=31536000, immutable",
   );
   res.setHeader(
@@ -1809,6 +1851,11 @@ export async function handleManagedOutgoingMediaHttpRequest(
     request: req,
   });
   writeByteHeaders(res, byteResponse);
+  if (!canUseMediaTicket()) {
+    await byteStream.close();
+    sendStatus(res, 401, "unauthorized");
+    return true;
+  }
   // Stream from the verified descriptor so a path swap cannot bypass fs-safe after validation.
   await byteStream.pipe(byteResponse, req.method);
   return true;

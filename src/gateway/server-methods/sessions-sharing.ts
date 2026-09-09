@@ -11,7 +11,6 @@ import {
   type SessionMember,
   type SessionMemberIdentity,
   type SessionMemberEvidence,
-  type SessionCreatedActor,
   type SessionSharingEvent,
   type SessionSharingEvidenceEvent,
   type SessionSharingIdentity,
@@ -20,7 +19,6 @@ import {
 import {
   addSessionMember,
   listSessionMembers,
-  loadCombinedSessionStoreForGatewayCore,
   removeSessionMember,
 } from "../../config/sessions.js";
 import {
@@ -31,13 +29,20 @@ import { resolveSessionPublicShare } from "../../config/sessions/session-public-
 import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lifecycle-admission.js";
-import { listProfiles } from "../../state/user-profiles.js";
 import {
   loadPublicSessionShareTokenCodec,
   type PublicSessionShareTokenCodec,
 } from "../control-ui-public-session-token.js";
 import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
 import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
+import {
+  isKnownSessionMemberIdentity,
+  knownSessionIdentities,
+  sharingActorStorageRef,
+  type SharingActorFacts,
+  UNKNOWN_SHARING_ACTOR_STORAGE_REF,
+  UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF,
+} from "../session-sharing-identities.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   allowedSessionVisibilities,
@@ -66,14 +71,7 @@ function runExclusiveSharingMutation<T>(
   });
 }
 
-const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
-const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
 const LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS = new Set(["local-operator", "operator.admin"]);
-
-type SharingActorFacts =
-  | { state: "present"; actor: SessionSharingIdentity }
-  | { state: "unknown" }
-  | { state: "absent" };
 
 function actorIdentity(client: GatewayClient | null): SharingActorFacts {
   const principal = gatewayClientSessionCreator(client);
@@ -83,14 +81,6 @@ function actorIdentity(client: GatewayClient | null): SharingActorFacts {
   return getGatewayLocalUserIngress(client)?.facts.invoker?.state === "unknown"
     ? { state: "unknown" }
     : { state: "absent" };
-}
-
-function sharingActorStorageRef(facts: SharingActorFacts): string {
-  return facts.state === "present"
-    ? facts.actor.id
-    : facts.state === "unknown"
-      ? UNKNOWN_SHARING_ACTOR_STORAGE_REF
-      : UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF;
 }
 
 function projectSessionMemberEvidence(
@@ -249,38 +239,6 @@ function requireCurrentManagedTarget(params: {
   return current;
 }
 
-function knownSessionIdentities(params: {
-  cfg: ReturnType<GatewayRequestContext["getRuntimeConfig"]>;
-  actor: SharingActorFacts;
-}): SessionSharingIdentity[] {
-  const identities = new Map<string, SessionSharingIdentity>();
-  const remember = (identity: SessionCreatedActor | null) => {
-    if (!identity?.id) {
-      return;
-    }
-    const current = identities.get(identity.id);
-    identities.set(identity.id, {
-      type: identity.type,
-      id: identity.id,
-      ...((identity.label ?? current?.label) ? { label: identity.label ?? current?.label } : {}),
-    });
-  };
-  if (params.actor.state === "present") {
-    remember(params.actor.actor);
-  }
-  const { store } = loadCombinedSessionStoreForGatewayCore(params.cfg, { projection: "list" });
-  for (const entry of Object.values(store)) {
-    remember(entry.createdActor ?? null);
-  }
-  for (const profile of listProfiles()) {
-    remember({
-      type: "human",
-      id: profile.id,
-      ...(profile.displayName ? { label: profile.displayName } : {}),
-    });
-  }
-  return [...identities.values()];
-}
 
 function publishSharingChange(params: {
   context: GatewayRequestContext;
@@ -683,12 +641,7 @@ export const sessionSharingHandlers: GatewayRequestHandlers = {
       cfg,
       actor,
     });
-    if (
-      !known.some((identity) => {
-        const candidate = sharingIdentityAsMember(identity);
-        return candidate?.type === memberIdentity.type && candidate.id === memberIdentity.id;
-      })
-    ) {
+    if (!isKnownSessionMemberIdentity(known, memberIdentity)) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "unknown identity"));
       return;
     }

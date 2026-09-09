@@ -299,7 +299,8 @@ export async function resolveSessionKeyFromResolveParams(params: {
     const entry = store[target.canonicalKey];
     if (entry) {
       if (
-        (hasOperatorBoundary(client, cfg) && entryFilter?.(target.canonicalKey, entry) === false) ||
+        ((resolveSessionVisibility(entry) === "restricted" || hasOperatorBoundary(client, cfg)) &&
+          entryFilter(target.canonicalKey, entry) === false) ||
         !isResolvedSessionKeyVisible({
           cfg,
           p,

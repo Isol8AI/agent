@@ -276,7 +276,10 @@ const execEventHeartbeatOptions = (sessionKey?: string) => ({
 });
 
 function buildCtx(
-  opts: { authorizeNodeSystemRunEvent?: NodeEventContext["authorizeNodeSystemRunEvent"] } = {},
+  opts: {
+    authorizeNodeSessionAccess?: NodeEventContext["authorizeNodeSessionAccess"];
+    authorizeNodeSystemRunEvent?: NodeEventContext["authorizeNodeSystemRunEvent"];
+  } = {},
 ): NodeEventContext {
   return {
     deps: {} as CliDeps,
@@ -293,6 +296,9 @@ function buildCtx(
     getHealthCache: () => null,
     refreshHealthSnapshot: async () => ({}) as HealthSummary,
     loadGatewayModelCatalog: async () => [],
+    ...(opts.authorizeNodeSessionAccess
+      ? { authorizeNodeSessionAccess: opts.authorizeNodeSessionAccess }
+      : {}),
     authorizeNodeSystemRunEvent: opts.authorizeNodeSystemRunEvent ?? (() => false),
     logGateway: { warn: () => {} },
   };
@@ -2626,6 +2632,30 @@ describe("chat subscribe/unsubscribe events", () => {
       payloadJSON: JSON.stringify({ other: 1 }),
     });
 
+    expect(nodeSubscribe).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["voice.transcript", { text: "private", sessionKey: "private-room" }],
+    ["agent.request", { message: "private", sessionKey: "private-room" }],
+    ["chat.subscribe", { sessionKey: "private-room" }],
+  ] as const)("rejects restricted room access from %s", async (event, payload) => {
+    agentCommandMock.mockClear();
+    upsertSessionEntryMock.mockClear();
+    const nodeSubscribe = vi.fn();
+    const ctx = {
+      ...buildCtx({ authorizeNodeSessionAccess: () => false }),
+      nodeSubscribe,
+    };
+
+    const result = await handleNodeEvent(ctx, "node-private", {
+      event,
+      payloadJSON: JSON.stringify(payload),
+    });
+
+    expect(result).toMatchObject({ handled: false, reason: "restricted_session" });
+    expect(agentCommandMock).not.toHaveBeenCalled();
+    expect(upsertSessionEntryMock).not.toHaveBeenCalled();
     expect(nodeSubscribe).not.toHaveBeenCalled();
   });
 });

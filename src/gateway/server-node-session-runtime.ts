@@ -23,6 +23,7 @@ import type {
 } from "./server-chat-state.js";
 import { createNodeSubscriptionManager } from "./server-node-subscriptions.js";
 import { hasConnectedTalkNode } from "./server-talk-nodes.js";
+import { resolveSessionSharingTarget, resolveSessionVisibility } from "./session-sharing.js";
 
 // Node session runtime owns connected node registry state, session event
 // subscriptions, and voice-wake fanout helpers for the gateway process.
@@ -39,7 +40,21 @@ export function createGatewayNodeSessionRuntime(params: {
   sessionEventSubscribers: SessionEventSubscriberRegistry;
   sessionMessageSubscribers: SessionMessageSubscriberRegistry;
 }) {
-  const nodeSubscriptions = createNodeSubscriptionManager();
+  const authorizeNodeSessionAccess = (sessionKey: string) => {
+    try {
+      const target = resolveSessionSharingTarget({
+        cfg: params.getConfig?.() ?? {},
+        sessionKey,
+        exactRead: true,
+      });
+      return !target || resolveSessionVisibility(target.entry) !== "restricted";
+    } catch {
+      return false;
+    }
+  };
+  const nodeSubscriptions = createNodeSubscriptionManager({
+    authorizeSessionAccess: authorizeNodeSessionAccess,
+  });
   const { nodeRegistry, nodeWorkerSupervisorTransport } = createNodeRegistryRuntime(
     () =>
       new NodeRegistry({

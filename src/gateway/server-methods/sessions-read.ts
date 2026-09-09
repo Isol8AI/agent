@@ -38,6 +38,7 @@ import {
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
 import { hasOperatorBoundary } from "../operator-role-policy.js";
+import { createAuthorizedSessionListEntryFilter } from "../session-list-access.js";
 import {
   resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId,
   tryResolveSessionCompatibilityOwnerAgentId,
@@ -290,7 +291,18 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
             loaded = { ...loadedStore, modelCatalogByAgent: preparedModelCatalogByAgent };
           }
           const { targetsBySessionKey, durableStorePath, modelCatalogByAgent, storePath } = loaded;
-          const visibleEntryFilter = listFilter({ p, loaded, client, cfg, options });
+          const accessFilter = createAuthorizedSessionListEntryFilter({
+            cfg,
+            client,
+            store: loaded.store,
+            targetsBySessionKey,
+          });
+          const visibleEntryFilter = listFilter({
+            p,
+            loaded,
+            options,
+            accessFilter,
+          });
           const selectionRuns =
             p.activeOnly === true || p.search?.trim()
               ? createVisibleActiveSessionRunProjector(context)

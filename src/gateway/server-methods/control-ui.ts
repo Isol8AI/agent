@@ -296,6 +296,14 @@ export function createControlUiHandlers(
         );
         return;
       }
+      if (subscriptions.authorize?.(connId, parsed.sessionKeys) === false) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.FORBIDDEN, "session pull request subscription is not authorized"),
+        );
+        return;
+      }
       if (parsed.refreshSessionKeys.length > 0) {
         void subscriptions.replace(connId, parsed.sessionKeys, new Set(parsed.refreshSessionKeys));
       } else {

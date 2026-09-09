@@ -83,12 +83,14 @@ const AGENT_RUN_START_METHODS = new Set([
   "wake",
 ]);
 
-const PRIVATE_POLICY_PLACEHOLDER_METHODS = new Set([
-  "sessions.files.get",
-  "sessions.files.list",
-  "sessions.files.reveal",
-  "sessions.files.set",
-]);
+function requiresPrivateRoomCapability(method: string): boolean {
+  return (
+    !isSessionReadAccessMethod(method) ||
+    method === "sessions.companion.ask" ||
+    method === "sessions.diff" ||
+    method.startsWith("sessions.files.")
+  );
+}
 
 function authorizeRestrictedPolicyPlaceholder(
   method: string,
@@ -96,13 +98,20 @@ function authorizeRestrictedPolicyPlaceholder(
 ): ErrorShape | null {
   if (
     resolveSessionVisibility(target.entry) !== "restricted" ||
-    !PRIVATE_POLICY_PLACEHOLDER_METHODS.has(method)
+    !requiresPrivateRoomCapability(method)
+  ) {
+    return null;
+  }
+  const policy = target.entry.privateRoomExecutionPolicy;
+  if (
+    policy?.allowedCapabilities.includes(method) === true ||
+    policy?.allowedCapabilities.includes(`gateway:${method}`) === true
   ) {
     return null;
   }
   return errorShape(
     ErrorCodes.INVALID_REQUEST,
-    "private room files are unavailable until its isolation policy is active",
+    `private room capability ${method} is unavailable until its isolation policy grants it`,
     {
       details: {
         code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE",
@@ -161,7 +170,7 @@ export function resolveSessionMutationAuthorization(params: {
   const adminBypass =
     isGatewayAdmin(params.client) &&
     !authorizesAgentRun &&
-    !PRIVATE_POLICY_PLACEHOLDER_METHODS.has(params.method);
+    !requiresPrivateRoomCapability(params.method);
   if (adminBypass && !bindsProgressLifecycle) {
     return { error: null };
   }

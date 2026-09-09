@@ -527,6 +527,14 @@ function parseSessionKeyFromPayloadJSON(payloadJSON: string): string | null {
   return sessionKey.length > 0 ? sessionKey : null;
 }
 
+function isNodeSessionAccessCurrent(ctx: NodeEventContext, sessionKey: string): boolean {
+  return ctx.authorizeNodeSessionAccess?.(sessionKey) ?? true;
+}
+
+function restrictedNodeSessionResult(event: string): NodeEventHandleResult {
+  return { ok: true, event, handled: false, reason: "restricted_session" };
+}
+
 function parsePayloadObject(payloadJSON?: string | null): Record<string, unknown> | null {
   if (!payloadJSON) {
     return null;
@@ -637,6 +645,9 @@ export const handleNodeEvent = async (
       const rawMainKey = normalizeMainKey(cfg.session?.mainKey);
       const sessionKey = sessionKeyRaw.length > 0 ? sessionKeyRaw : rawMainKey;
       const { storePath, entry, canonicalKey } = loadSessionEntry(sessionKey);
+      if (!isNodeSessionAccessCurrent(ctx, canonicalKey)) {
+        return restrictedNodeSessionResult(evt.event);
+      }
       if (resolveAgentHarnessSessionContextError(canonicalKey, entry)) {
         return undefined;
       }
@@ -670,7 +681,9 @@ export const handleNodeEvent = async (
           allowModelOverride: false,
         },
         reservation: transcriptReservation,
-        isConnectionCurrent: opts?.isConnectionCurrent,
+        isConnectionCurrent: async () =>
+          (await isNodeEventConnectionCurrent(opts)) &&
+          isNodeSessionAccessCurrent(ctx, canonicalKey),
         onStart: () => {
           queueSessionStoreTouch({
             ctx,
@@ -680,7 +693,9 @@ export const handleNodeEvent = async (
             entry,
             sessionId,
             now: receivedAt,
-            isConnectionCurrent: opts?.isConnectionCurrent,
+            isConnectionCurrent: async () =>
+              (await isNodeEventConnectionCurrent(opts)) &&
+              isNodeSessionAccessCurrent(ctx, canonicalKey),
           });
 
           // Voice now has a unique per-turn run id, so it is also the stable
@@ -727,6 +742,12 @@ export const handleNodeEvent = async (
       const sessionKey = sessionKeyRaw.length > 0 ? sessionKeyRaw : `node-${nodeId}`;
       const cfg = getRuntimeConfig();
       const { storePath, entry, canonicalKey } = loadSessionEntry(sessionKey);
+      if (!isNodeSessionAccessCurrent(ctx, canonicalKey)) {
+        return restrictedNodeSessionResult(evt.event);
+      }
+      const isRequestCurrent = async () =>
+        (await isNodeEventConnectionCurrent(opts)) &&
+        isNodeSessionAccessCurrent(ctx, canonicalKey);
       if (resolveAgentHarnessSessionContextError(canonicalKey, entry)) {
         return undefined;
       }
@@ -756,7 +777,7 @@ export const handleNodeEvent = async (
           provider: modelRef.provider,
           model: modelRef.model,
         });
-        if (!(await isNodeEventConnectionCurrent(opts))) {
+        if (!(await isRequestCurrent())) {
           return pairingChangedResult(evt.event);
         }
         try {
@@ -769,7 +790,7 @@ export const handleNodeEvent = async (
             // explicitly rather than saving them where the agent cannot reach them.
             acceptNonImage: false,
           });
-          if (!(await isNodeEventConnectionCurrent(opts))) {
+          if (!(await isRequestCurrent())) {
             await cleanupNodeEventMedia(
               (parsed.offloadedRefs ?? []).map((ref) => ref.id),
               ctx,
@@ -815,7 +836,7 @@ export const handleNodeEvent = async (
 
       const now = Date.now();
       const sessionId = entry?.sessionId ?? randomUUID();
-      if (!(await isNodeEventConnectionCurrent(opts))) {
+      if (!(await isRequestCurrent())) {
         await cleanupNodeEventMedia(
           (offloadedRefs ?? []).map((ref) => ref.id),
           ctx,
@@ -831,7 +852,7 @@ export const handleNodeEvent = async (
         now,
         dependencies,
       });
-      if (!(await isNodeEventConnectionCurrent(opts))) {
+      if (!(await isRequestCurrent())) {
         await cleanupNodeEventMedia(
           (offloadedRefs ?? []).map((ref) => ref.id),
           ctx,
@@ -862,7 +883,7 @@ export const handleNodeEvent = async (
         );
       }
 
-      if (!(await isNodeEventConnectionCurrent(opts))) {
+      if (!(await isRequestCurrent())) {
         await cleanupNodeEventMedia(
           (offloadedRefs ?? []).map((ref) => ref.id),
           ctx,
@@ -876,7 +897,7 @@ export const handleNodeEvent = async (
         log: ctx.logGateway,
         logContext: "agent.request",
       });
-      if (!(await isNodeEventConnectionCurrent(opts))) {
+      if (!(await isRequestCurrent())) {
         await cleanupNodeEventMedia(
           persistedTranscriptMedia.entries.map((media) => media.id),
           ctx,
@@ -895,7 +916,7 @@ export const handleNodeEvent = async (
         // Delivery stays detached from agent startup, but remains part of the
         // accepted node request until the durable send settles.
         void runWithGatewayIndependentRootWorkContinuation(async () => {
-          if (!(await isNodeEventConnectionCurrent(opts))) {
+          if (!(await isRequestCurrent())) {
             return;
           }
           await sendReceiptAck({
@@ -940,7 +961,7 @@ export const handleNodeEvent = async (
           allowModelOverride: false,
         },
         dependencies,
-        opts?.isConnectionCurrent,
+        isRequestCurrent,
         () =>
           cleanupNodeEventMedia(
             persistedTranscriptMedia.entries.map((media) => media.id),
@@ -980,6 +1001,9 @@ export const handleNodeEvent = async (
       }
       const sessionKeyRaw = target.sessionKey;
       const { canonicalKey: sessionKey, entry } = loadSessionEntry(sessionKeyRaw);
+      if (!isNodeSessionAccessCurrent(ctx, sessionKey)) {
+        return restrictedNodeSessionResult(evt.event);
+      }
       if (resolveAgentHarnessSessionContextError(sessionKey, entry)) {
         return undefined;
       }
@@ -1034,6 +1058,9 @@ export const handleNodeEvent = async (
         return undefined;
       }
       const { canonicalKey } = loadSessionEntry(sessionKey);
+      if (!isNodeSessionAccessCurrent(ctx, canonicalKey)) {
+        return restrictedNodeSessionResult(evt.event);
+      }
       // Fanout is keyed by the canonical session; retain the connection owner for safe reconnect.
       await ctx.nodeSubscribe(nodeId, canonicalKey, opts?.connId);
       return undefined;
@@ -1047,6 +1074,9 @@ export const handleNodeEvent = async (
         return undefined;
       }
       const { canonicalKey } = loadSessionEntry(sessionKey);
+      if (!isNodeSessionAccessCurrent(ctx, canonicalKey)) {
+        return restrictedNodeSessionResult(evt.event);
+      }
       await ctx.nodeUnsubscribe(nodeId, canonicalKey, opts?.connId);
       return undefined;
     }
@@ -1062,6 +1092,9 @@ export const handleNodeEvent = async (
         return undefined;
       }
       const { canonicalKey: sessionKey } = loadSessionEntry(sessionKeyRaw);
+      if (!isNodeSessionAccessCurrent(ctx, sessionKey)) {
+        return restrictedNodeSessionResult(evt.event);
+      }
 
       const cfg = getRuntimeConfig();
       const runId = normalizeOptionalString(obj.runId) ?? "";

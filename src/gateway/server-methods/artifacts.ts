@@ -29,6 +29,7 @@ import {
   resolveRequestedSessionAgentId,
   tryResolveSessionCompatibilityOwnerAgentId,
 } from "../session-request-agent.js";
+import { captureSessionBearerAccess } from "../session-bearer-access.js";
 import { visitSessionMessagesAsync } from "../session-transcript-readers.js";
 import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
 import {
@@ -57,6 +58,13 @@ type ArtifactCollectionOptions = {
   downloadArtifactId?: string;
 };
 
+type ArtifactSessionFence = {
+  agentId: string;
+  sessionId: string;
+  sessionKey: string;
+  storePath: string;
+};
+
 function admitArtifactQuery<T extends ArtifactQuery>(
   query: T,
   cfg: OpenClawConfig | undefined,
@@ -81,6 +89,59 @@ function artifactError(type: string, message: string, details?: Record<string, u
       ...details,
     },
   });
+}
+
+function artifactScopeNotFound(): ArtifactSessionResolutionError {
+  return new ArtifactSessionResolutionError(
+    errorShape(ErrorCodes.INVALID_REQUEST, "no session found for artifact query", {
+      details: { type: "artifact_scope_not_found" },
+    }),
+  );
+}
+
+function captureArtifactSessionFence(params: {
+  cfg?: OpenClawConfig;
+  client: GatewayClient | null;
+  query: ArtifactQuery;
+}): ArtifactSessionFence | undefined {
+  const resolved = resolveAuthorizedArtifactSession(params.query, params.cfg, params.client);
+  if (!resolved) {
+    return undefined;
+  }
+  const loaded = loadGatewaySessionEntryReadOnly(
+    resolved.sessionKey,
+    resolved.agentId ? { agentId: resolved.agentId } : undefined,
+  );
+  if (!loaded.entry?.sessionId || !loaded.storePath) {
+    return undefined;
+  }
+  return {
+    agentId: loaded.agentId,
+    sessionId: loaded.entry.sessionId,
+    sessionKey: loaded.canonicalKey,
+    storePath: loaded.storePath,
+  };
+}
+
+function assertArtifactSessionFenceCurrent(params: {
+  cfg?: OpenClawConfig;
+  client: GatewayClient | null;
+  fence: ArtifactSessionFence;
+}): void {
+  const current = captureArtifactSessionFence({
+    cfg: params.cfg,
+    client: params.client,
+    query: { sessionKey: params.fence.sessionKey, agentId: params.fence.agentId },
+  });
+  if (
+    !current ||
+    current.agentId !== params.fence.agentId ||
+    current.sessionId !== params.fence.sessionId ||
+    current.sessionKey !== params.fence.sessionKey ||
+    current.storePath !== params.fence.storePath
+  ) {
+    throw artifactScopeNotFound();
+  }
 }
 
 function normalizeArtifactType(value: string): string {
@@ -314,7 +375,7 @@ async function loadArtifacts(
   cfg?: OpenClawConfig,
   opts: ArtifactCollectionOptions = {},
   client: GatewayClient | null = null,
-): Promise<{ artifacts: ArtifactRecord[]; sessionKey?: string }> {
+): Promise<{ artifacts: ArtifactRecord[]; fence?: ArtifactSessionFence; sessionKey?: string }> {
   const resolved = resolveAuthorizedArtifactSession(query, cfg, client);
   if (!resolved) {
     return { artifacts: [] };
@@ -350,9 +411,21 @@ async function loadArtifacts(
       });
     },
   );
+  const fence = {
+    agentId: resolved.agentId ?? resolveAgentIdFromSessionKey(sessionKey),
+    sessionId,
+    sessionKey,
+    storePath,
+  };
+  assertArtifactSessionFenceCurrent({
+    cfg,
+    client,
+    fence,
+  });
   return {
     sessionKey,
     artifacts,
+    fence,
   };
 }
 
@@ -407,12 +480,14 @@ async function findArtifact(
   client: GatewayClient | null = null,
 ): Promise<{
   artifact?: ArtifactRecord;
+  fence?: ArtifactSessionFence;
   sessionKey?: string;
 }> {
   const loaded = await loadArtifacts(params, cfg, opts, client);
   return {
     sessionKey: loaded.sessionKey,
     artifact: loaded.artifacts.find((artifact) => artifact.id === params.artifactId),
+    ...(loaded.fence ? { fence: loaded.fence } : {}),
   };
 }
 
@@ -504,8 +579,26 @@ export const artifactsHandlers: GatewayRequestHandlers = {
         return;
       }
       const resolved = resolvedResult.value;
+      const fence = resolved
+        ? captureArtifactSessionFence({
+            cfg,
+            client,
+            query: {
+              sessionKey: resolved.sessionKey,
+              ...(resolved.agentId ? { agentId: resolved.agentId } : {}),
+            },
+          })
+        : undefined;
       const defaultAgentId = resolved
         ? tryResolveSessionCompatibilityOwnerAgentId(cfg ?? {}, resolved.sessionKey)
+        : undefined;
+      const access = resolved
+        ? captureSessionBearerAccess({
+            cfg: cfg ?? {},
+            client,
+            sessionKey: resolved.sessionKey,
+            ...(resolved.agentId ? { agentId: resolved.agentId } : {}),
+          })
         : undefined;
       const managed = resolved
         ? await resolveManagedOutgoingMediaArtifactDownload({
@@ -513,9 +606,19 @@ export const artifactsHandlers: GatewayRequestHandlers = {
             ...(resolved.agentId ? { agentId: resolved.agentId } : {}),
             ...(defaultAgentId ? { defaultAgentId } : {}),
             artifactId: params.artifactId,
+            ...(access ? { access } : {}),
           })
         : null;
       if (managed) {
+        const current = await runArtifactSessionOperation(respond, () => {
+          if (!fence) {
+            throw artifactScopeNotFound();
+          }
+          assertArtifactSessionFenceCurrent({ cfg, client, fence });
+        });
+        if (!current.ok) {
+          return;
+        }
         respond(true, {
           artifact: {
             id: managed.artifactId,
@@ -541,7 +644,7 @@ export const artifactsHandlers: GatewayRequestHandlers = {
     if (!found.ok) {
       return;
     }
-    const { artifact } = found.value;
+    const { artifact, fence } = found.value;
     if (!artifact) {
       respondArtifactNotFound(respond, params.artifactId);
       return;
@@ -556,13 +659,29 @@ export const artifactsHandlers: GatewayRequestHandlers = {
       );
       return;
     }
+    const access = captureSessionBearerAccess({
+      cfg: cfg ?? {},
+      client,
+      sessionKey: artifact.sessionKey,
+      ...(admittedQuery.agentId ? { agentId: admittedQuery.agentId } : {}),
+    });
     const managedUrl =
       artifact.download.mode === "url" && artifact.url && artifact.sessionKey
         ? await resolveManagedOutgoingMediaUrlDownload({
             sessionKey: artifact.sessionKey,
             url: artifact.url,
+            ...(access ? { access } : {}),
           })
         : null;
+    const current = await runArtifactSessionOperation(respond, () => {
+      if (!fence) {
+        throw artifactScopeNotFound();
+      }
+      assertArtifactSessionFenceCurrent({ cfg, client, fence });
+    });
+    if (!current.ok) {
+      return;
+    }
     respond(true, {
       artifact: toSummary(artifact),
       ...(artifact.download.mode === "bytes"

@@ -8,6 +8,7 @@ import { isReadHttpMethod, respondNotFound, respondPlainText } from "./control-u
 import { sendMethodNotAllowed } from "./http-common.js";
 import type { GatewayContextResolver } from "./server-methods/types.js";
 import { sessionObserverScopeKey } from "./session-observer-model.js";
+import { canUseSessionBearerAccess } from "./session-bearer-access.js";
 
 const BOARD_WIDGET_NAME_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
@@ -80,6 +81,18 @@ export function handleBoardHttpRequest(
     ? sessionObserverScopeKey(authorized.sessionKey, authorized.agentId)
     : authorized.sessionKey;
   if (routeSessionKey !== path.sessionKey || authorized.name !== path.name) {
+    respondPlainText(res, 401, "Unauthorized");
+    return true;
+  }
+  const gatewayContext = opts.resolveGatewayContext?.();
+  if (
+    !canUseSessionBearerAccess({
+      cfg: gatewayContext?.getRuntimeConfig?.() ?? {},
+      sessionKey: authorized.sessionKey,
+      ...(authorized.agentId ? { agentId: authorized.agentId } : {}),
+      ...(authorized.access ? { binding: authorized.access } : {}),
+    })
+  ) {
     respondPlainText(res, 401, "Unauthorized");
     return true;
   }

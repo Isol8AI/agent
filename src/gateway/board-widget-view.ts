@@ -6,11 +6,13 @@ import {
   resolveBoardWidgetContentKindResourceUrls,
 } from "../plugins/board-widget-content-kinds.js";
 import { requireBoardViewTicketAuthority, verifyBoardViewTicket } from "./board-view-ticket.js";
+import type { SessionBearerAccessBinding } from "./session-bearer-access.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 
 type AuthorizedBoardWidgetView = BoardSessionTarget & {
   name: string;
   document: Extract<BoardWidgetDocument, { html: string }>;
+  access?: SessionBearerAccessBinding;
 };
 
 export function resolveAuthorizedBoardWidgetView(
@@ -74,10 +76,20 @@ export function resolveAuthorizedBoardWidgetView(
       ...(document.declared ? { declared: document.declared } : {}),
       resourceOrigins,
     };
-    return { ...session, name: claims.name, document: composed };
+    return {
+      ...session,
+      name: claims.name,
+      document: composed,
+      ...(claims.access ? { access: claims.access } : {}),
+    };
   }
   if (!("html" in document)) {
     throw new BoardValidationError("invalid_operation", "board widget view ticket is stale");
   }
-  return { ...session, name: claims.name, document };
+  return {
+    ...session,
+    name: claims.name,
+    document,
+    ...(claims.access ? { access: claims.access } : {}),
+  };
 }

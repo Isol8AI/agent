@@ -7,7 +7,11 @@ import {
   type SessionVisibility,
 } from "../../packages/gateway-protocol/src/index.js";
 import { GATEWAY_OWNER_PROFILE_ID } from "../../packages/gateway-protocol/src/schema/users.js";
-import { isSessionMember, type SessionEntry } from "../config/sessions.js";
+import {
+  isSessionMember,
+  type InternalSessionEntry,
+  type SessionEntry,
+} from "../config/sessions.js";
 import { sessionCreatorProfileId } from "../config/sessions/session-entry-provenance.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isIncognitoSessionKey } from "../routing/session-key.js";
@@ -37,7 +41,7 @@ import {
 export type SessionSharingTarget = {
   agentId: string;
   canonicalKey: string;
-  entry: SessionEntry;
+  entry: InternalSessionEntry;
   storeKey: string;
   storeKeys: string[];
   storePath: string;
@@ -102,8 +106,8 @@ export function resolveSessionSharingTarget(params: {
     key: params.sessionKey,
     agentId: params.agentId,
     clone: false,
-    // Authorization rechecks current metadata; prompt snapshots are not part of that binding.
-    projection: "list",
+    // Authorization includes the persisted private-room execution policy.
+    projection: "full",
     // Batch callers reuse one store snapshot; single-target checks must not
     // materialize unrelated sessions for every task or authorization recheck.
     exactRead: params.exactRead ?? !params.storeCache,
@@ -120,6 +124,7 @@ export function resolveSessionSharingTargets(params: {
 }): Array<SessionSharingTarget | null> {
   return resolveGatewaySessionStoreTargetsReadOnly({
     cfg: params.cfg,
+    projection: "full",
     targets: params.targets.map(({ sessionKey, agentId }) => ({ key: sessionKey, agentId })),
   }).map(toSessionSharingTarget);
 }

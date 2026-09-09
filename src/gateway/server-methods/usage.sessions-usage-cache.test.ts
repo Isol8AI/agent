@@ -1,7 +1,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { ensureProfileForEmail } from "../../state/user-profiles.js";
+import { ensureProfileForEmail, setUserProfileRole } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import type { GatewayClient } from "./types.js";
 
@@ -225,6 +225,8 @@ describe("sessions.usage result cache", () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const firstProfile = ensureProfileForEmail("first@example.com");
       const secondProfile = ensureProfileForEmail("second@example.com");
+      const outsiderProfile = ensureProfileForEmail("usage-outsider@example.com");
+      setUserProfileRole(outsiderProfile.id, "writer");
       const roleConfig: OpenClawConfig = {
         ...config,
         gateway: {
@@ -233,6 +235,11 @@ describe("sessions.usage result cache", () => {
             definitions: {
               guest: {
                 sessions: { others: "none" },
+                agents: "*",
+                scopes: ["operator.read", "operator.write"],
+              },
+              writer: {
+                sessions: { others: "write" },
                 agents: "*",
                 scopes: ["operator.read", "operator.write"],
               },
@@ -276,7 +283,7 @@ describe("sessions.usage result cache", () => {
             sessionId: "session-second",
             updatedAt: 100,
             createdActor: { type: "human", source: "profile", id: secondProfile.id },
-            visibility: "shared",
+            visibility: "restricted",
           },
         },
       });
@@ -336,13 +343,29 @@ describe("sessions.usage result cache", () => {
         roleConfig,
         identifiedClient(secondProfile.id),
       )) as typeof unrestricted;
+      const outsider = (await runSessionsUsage(
+        baseParams,
+        roleConfig,
+        identifiedClient(outsiderProfile.id),
+      )) as typeof unrestricted;
+      const unboundedOutsider = (await runSessionsUsage(
+        baseParams,
+        config,
+        identifiedClient(outsiderProfile.id),
+      )) as typeof unrestricted;
 
       expect(unrestricted.totals.totalTokens).toBe(20);
       expect(first.sessions.map((session) => session.key)).toEqual(["agent:main:first"]);
       expect(second.sessions.map((session) => session.key)).toEqual(["agent:main:second"]);
       expect(first.totals.totalTokens).toBe(10);
       expect(second.totals.totalTokens).toBe(10);
-      expect(testApi.sessionsUsageCache.size).toBe(3);
+      expect(outsider.sessions.map((session) => session.key)).toEqual(["agent:main:first"]);
+      expect(outsider.totals.totalTokens).toBe(10);
+      expect(unboundedOutsider.sessions.map((session) => session.key)).toEqual([
+        "agent:main:first",
+      ]);
+      expect(unboundedOutsider.totals.totalTokens).toBe(10);
+      expect(testApi.sessionsUsageCache.size).toBe(5);
 
       const deniedCost = await runSessionsUsage(
         baseParams,

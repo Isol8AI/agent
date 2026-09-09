@@ -113,6 +113,11 @@ import {
 } from "./session-lifecycle-preparation.js";
 import { resolvePluginSessionOwnershipError } from "./session-plugin-ownership.js";
 import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
+import {
+  isKnownSessionMemberIdentity,
+  knownSessionIdentities,
+  sharingActorStorageRef,
+} from "./session-sharing-identities.js";
 import { isSessionVisibilityAllowed, resolveSessionVisibility } from "./session-sharing.js";
 import {
   loadGatewaySessionEntryReadOnly,
@@ -464,6 +469,23 @@ export async function createGatewaySession(params: {
     return {
       ok: false,
       error: errorShape(ErrorCodes.INVALID_REQUEST, "invalid restricted room member identity"),
+    };
+  }
+  const roomCreatorActor = roomCreator
+    ? ({ state: "present", actor: roomCreator } as const)
+    : ({ state: "absent" } as const);
+  const knownRoomIdentities = hasRestrictedRoomContract
+    ? knownSessionIdentities({ cfg: params.cfg, actor: roomCreatorActor })
+    : [];
+  if (
+    hasRestrictedRoomContract &&
+    roomMembers?.some(
+      (identity) => !isKnownSessionMemberIdentity(knownRoomIdentities, identity),
+    )
+  ) {
+    return {
+      ok: false,
+      error: errorShape(ErrorCodes.INVALID_REQUEST, "unknown restricted room member identity"),
     };
   }
   const requestedProfile = splitTrailingAuthProfile(
@@ -1635,7 +1657,7 @@ export async function createGatewaySession(params: {
                   },
                   {
                     identities: roomMembers,
-                    addedBy: `${roomCreatorIdentity.type}:${roomCreatorIdentity.id}`,
+                    addedBy: sharingActorStorageRef(roomCreatorActor),
                     expectedSessionId: createdRoomSessionId,
                   },
                 );

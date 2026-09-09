@@ -34,8 +34,14 @@ type NodeSubscriptionManager = {
   ) => Promise<void>;
 };
 
+type NodeSubscriptionManagerOptions = {
+  authorizeSessionAccess?: (sessionKey: string) => boolean;
+};
+
 /** Manages node subscriptions to gateway session events. */
-export function createNodeSubscriptionManager(): NodeSubscriptionManager {
+export function createNodeSubscriptionManager(
+  options: NodeSubscriptionManagerOptions = {},
+): NodeSubscriptionManager {
   const nodeSubscriptions = new Map<
     string,
     { pairingGeneration: string; sessionKeys: Set<string> }
@@ -66,6 +72,9 @@ export function createNodeSubscriptionManager(): NodeSubscriptionManager {
     const normalizedPairingGeneration = pairingGeneration.trim();
     const normalizedSessionKey = sessionKey.trim();
     if (!normalizedNodeId || !normalizedPairingGeneration || !normalizedSessionKey) {
+      return;
+    }
+    if (options.authorizeSessionAccess?.(normalizedSessionKey) === false) {
       return;
     }
 
@@ -182,6 +191,12 @@ export function createNodeSubscriptionManager(): NodeSubscriptionManager {
     }
     const subscribers = sessionSubscribers.get(normalizedSessionKey);
     if (!subscribers || subscribers.size === 0) {
+      return;
+    }
+    if (options.authorizeSessionAccess?.(normalizedSessionKey) === false) {
+      for (const [nodeId, pairingGeneration] of [...subscribers]) {
+        unsubscribe(nodeId, pairingGeneration, normalizedSessionKey);
+      }
       return;
     }
 

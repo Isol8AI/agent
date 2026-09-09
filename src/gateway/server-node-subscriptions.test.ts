@@ -70,4 +70,26 @@ describe("node subscription manager", () => {
 
     expect(sendEvent).not.toHaveBeenCalled();
   });
+
+  test("rejects restricted subscriptions and suppresses delivery after access is withdrawn", async () => {
+    let allowed = false;
+    const manager = createNodeSubscriptionManager({
+      authorizeSessionAccess: () => allowed,
+    });
+    const sendEvent = vi.fn();
+
+    manager.subscribe("node-a", "generation-a", "private-room");
+    await manager.sendToSession("private-room", "chat", { hidden: true }, sendEvent);
+    expect(sendEvent).not.toHaveBeenCalled();
+
+    allowed = true;
+    manager.subscribe("node-a", "generation-a", "private-room");
+    allowed = false;
+    await manager.sendToSession("private-room", "chat", { hidden: true }, sendEvent);
+    expect(sendEvent).not.toHaveBeenCalled();
+
+    allowed = true;
+    await manager.sendToSession("private-room", "chat", { hidden: true }, sendEvent);
+    expect(sendEvent).not.toHaveBeenCalled();
+  });
 });

@@ -314,6 +314,14 @@ describe("session sharing policy", () => {
           visibility: "restricted",
           roomKind: "group-dm",
           sandbox: "required",
+          privateRoomExecutionPolicy: {
+            isolationSubject: { type: "session", sessionId: "restricted-session" },
+            sandbox: "required",
+            workspaceAccess: "none",
+            sessionRoot: "/tmp/restricted-session",
+            toolPolicyVersion: "private-room-v1",
+            allowedCapabilities: [],
+          },
           createdActor: {
             type: "human",
             source: "profile",
@@ -355,6 +363,17 @@ describe("session sharing policy", () => {
         ["artifacts.get", { sessionKey }],
         ["artifacts.download", { sessionKey }],
         ["board.data.read", { sessionKey }],
+        ["board.get", { sessionKey }],
+        ["board.widget.appView", { sessionKey }],
+        ["mcp.app.view", { sessionKey }],
+        ["mcp.app.listTools", { sessionKey }],
+        ["mcp.app.listResources", { sessionKey }],
+        ["mcp.app.listResourceTemplates", { sessionKey }],
+        ["mcp.app.readResource", { sessionKey }],
+        ["sessions.compaction.list", { key: sessionKey }],
+        ["sessions.usage", { key: sessionKey }],
+        ["sessions.usage.timeseries", { key: sessionKey }],
+        ["sessions.usage.logs", { key: sessionKey }],
         ["sessions.files.get", { sessionKey }],
         ["sessions.files.set", { sessionKey }],
         ["session.typing", { sessionKey }],
@@ -381,14 +400,26 @@ describe("session sharing policy", () => {
       expect(resolveSessionSharingRole({ cfg, client: writer, target: restrictedTarget })).toBe(
         "member",
       );
-      expect(
-        resolveSessionMutationAuthorization({
-          client: writer,
-          method: "chat.history",
-          requestParams: { sessionKey },
-          context,
-        }).error,
-      ).toBeNull();
+      for (const [method, requestParams] of [
+        ["chat.history", { sessionKey }],
+        ["board.get", { sessionKey }],
+        ["board.widget.appView", { sessionKey }],
+        ["mcp.app.view", { sessionKey }],
+        ["mcp.app.listTools", { sessionKey }],
+        ["mcp.app.listResources", { sessionKey }],
+        ["mcp.app.listResourceTemplates", { sessionKey }],
+        ["mcp.app.readResource", { sessionKey }],
+        ["sessions.compaction.list", { key: sessionKey }],
+        ["sessions.usage", { key: sessionKey }],
+        ["sessions.usage.timeseries", { key: sessionKey }],
+        ["sessions.usage.logs", { key: sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: writer, method, requestParams, context })
+            .error,
+          method,
+        ).toBeNull();
+      }
       expect(canReceiveSessionEvent({ cfg, client: writer, sessionKeys: [sessionKey] })).toBe(true);
       expect(
         authorizeResolvedSessionMutation({
@@ -398,22 +429,20 @@ describe("session sharing policy", () => {
           agentId: "main",
         }),
       ).toMatchObject({ details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } });
-      expect(
-        resolveSessionMutationAuthorization({
-          client: writer,
-          method: "tools.invoke",
-          requestParams: { sessionKey },
-          context,
-        }).error,
-      ).toMatchObject({ details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } });
-      expect(
-        resolveSessionMutationAuthorization({
-          client: writer,
-          method: "sessions.files.get",
-          requestParams: { sessionKey },
-          context,
-        }).error,
-      ).toMatchObject({ details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } });
+      for (const [method, requestParams] of [
+        ["tools.invoke", { sessionKey }],
+        ["sessions.files.get", { sessionKey }],
+        ["sessions.companion.ask", { sessionKey }],
+        ["sessions.diff", { sessionKey }],
+        ["mcp.app.callTool", { sessionKey }],
+        ["plugins.sessionAction", { sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: writer, method, requestParams, context })
+            .error,
+          method,
+        ).toMatchObject({ details: { code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE" } });
+      }
 
       const agent = client({});
       agent.internal = {

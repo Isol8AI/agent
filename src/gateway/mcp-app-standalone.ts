@@ -21,6 +21,12 @@ import {
   withMcpAppActiveView,
 } from "./mcp-app-operations.js";
 import { runStandaloneMcpAppHost } from "./mcp-app-standalone-host.js";
+import {
+  canUseSessionBearerAccess,
+  canUseSessionBearerCapability,
+  type SessionBearerAccessBinding,
+} from "./session-bearer-access.js";
+import { getRuntimeConfig } from "../config/config.js";
 
 const MCP_APP_STANDALONE_TICKET_SCOPE = "mcp-app-standalone-view";
 const MCP_APP_STANDALONE_INITIAL_LOAD_TIMEOUT_MS = 30_000;
@@ -34,9 +40,11 @@ const ticketSecret = randomBytes(32);
 type StandaloneTicketBinding = {
   nonce: string;
   sessionKey: string;
+  agentId?: string;
   sessionId: string;
   viewId: string;
   expiresAtMs: number;
+  access?: SessionBearerAccessBinding;
 };
 
 type StandaloneTicket = { ticket: string; url: string; expiresAtMs: number };
@@ -67,7 +75,9 @@ function formatTicket(binding: StandaloneTicketBinding, secret: Buffer): string 
 
 export function createMcpAppStandaloneTicket(params: {
   sessionKey: string;
+  agentId?: string;
   view: Pick<McpAppViewLease, "viewId" | "sessionId" | "expiresAtMs">;
+  access?: SessionBearerAccessBinding;
   nowMs?: number;
   secret?: Buffer;
 }): StandaloneTicket | undefined {
@@ -81,8 +91,10 @@ export function createMcpAppStandaloneTicket(params: {
   for (const binding of ticketBindings.values()) {
     if (
       binding.sessionKey === params.sessionKey &&
+      binding.agentId === params.agentId &&
       binding.sessionId === params.view.sessionId &&
-      binding.viewId === params.view.viewId
+      binding.viewId === params.view.viewId &&
+      JSON.stringify(binding.access) === JSON.stringify(params.access)
     ) {
       if (binding.expiresAtMs > params.view.expiresAtMs) {
         ticketBindings.delete(binding.nonce);
@@ -114,9 +126,11 @@ export function createMcpAppStandaloneTicket(params: {
   const binding: StandaloneTicketBinding = {
     nonce,
     sessionKey: params.sessionKey,
+    ...(params.agentId ? { agentId: params.agentId } : {}),
     sessionId: params.view.sessionId,
     viewId: params.view.viewId,
     expiresAtMs,
+    ...(params.access ? { access: params.access } : {}),
   };
   ticketBindings.set(nonce, binding);
   const ticket = formatTicket(binding, params.secret ?? ticketSecret);
@@ -177,6 +191,16 @@ function resolveTicketActiveView(
 ): McpAppActiveView | undefined {
   const binding = verifyMcpAppStandaloneTicket(value, { nowMs, secret });
   if (!binding) {
+    return undefined;
+  }
+  if (
+    !canUseSessionBearerAccess({
+      cfg: getRuntimeConfig(),
+      sessionKey: binding.sessionKey,
+      ...(binding.agentId ? { agentId: binding.agentId } : {}),
+      ...(binding.access ? { binding: binding.access } : {}),
+    })
+  ) {
     return undefined;
   }
   const runtime = peekSessionMcpRuntime({ sessionKey: binding.sessionKey });
@@ -378,8 +402,30 @@ export async function handleMcpAppStandaloneHttpRequest(
           sendJson(res, 403, { ok: false, error: "MCP App tool bridge is unavailable" });
           return;
         }
+        const binding = ticket
+          ? verifyMcpAppStandaloneTicket(ticket, { nowMs: now(), secret })
+          : undefined;
+        if (
+          operation.method === "tools/call" &&
+          (!binding ||
+            !canUseSessionBearerCapability({
+              cfg: getRuntimeConfig(),
+              sessionKey: binding.sessionKey,
+              ...(binding.agentId ? { agentId: binding.agentId } : {}),
+              ...(binding.access ? { binding: binding.access } : {}),
+              capability: "mcp.app.callTool",
+            }))
+        ) {
+          sendJson(res, 403, { ok: false, error: "MCP App tool bridge is unavailable" });
+          return;
+        }
         const result = await executeMcpAppOperation(current, operation);
         controller.signal.throwIfAborted();
+        if (!ticket || !resolveTicketActiveView(ticket, now(), secret)) {
+          res.setHeader("WWW-Authenticate", "MCP-App");
+          sendJson(res, 401, { ok: false, error: "Unauthorized" });
+          return;
+        }
         sendJson(res, 200, { ok: true, result });
       });
     } catch (error) {
@@ -397,6 +443,11 @@ export async function handleMcpAppStandaloneHttpRequest(
       const { runtime, view } = active;
       const serverResources =
         runtime.readResource !== undefined && (await supportsStandaloneResourceOperations(view));
+      if (!ticket || !resolveTicketActiveView(ticket, now(), secret)) {
+        res.setHeader("WWW-Authenticate", "MCP-App");
+        sendJsonRepresentation(req, res, 401, { ok: false, error: "Unauthorized" });
+        return true;
+      }
       sendJsonRepresentation(req, res, 200, {
         sandboxUrl: buildMcpAppSandboxPath(view.csp),
         sandboxPort,

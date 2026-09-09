@@ -6,6 +6,7 @@ import {
 } from "../config/sessions/session-accessor.js";
 import { listSessionMembers } from "../config/sessions/session-sharing-store.js";
 import { withSessionTranscriptWriteLock } from "../plugin-sdk/session-transcript-runtime.js";
+import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { createGatewaySession } from "./session-create-service.js";
 
@@ -33,10 +34,21 @@ async function appendImportedMessage(params: {
 describe("atomic Gateway session initialization", () => {
   it("creates a restricted thread and its typed ACL as one distinct room node", async () => {
     await withOpenClawTestState({ label: "atomic-restricted-room" }, async () => {
+      const owner = ensureProfileForEmail("atomic-room-owner@example.test");
+      const profileMember = ensureProfileForEmail("atomic-room-member@example.test");
+      const threadProfileMember = ensureProfileForEmail("atomic-thread-member@example.test");
       const creator = {
         via: "operator" as const,
-        actor: { type: "human" as const, source: "profile" as const, id: "profile-owner" },
+        actor: { type: "human" as const, source: "profile" as const, id: owner.id },
       };
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey: "agent:main:known-agent" },
+        {
+          sessionId: "known-agent",
+          updatedAt: 1,
+          createdActor: { type: "agent", id: "same-id" },
+        },
+      );
       const parent = await createGatewaySession({
         cfg: {},
         key: "agent:main:private-parent",
@@ -44,7 +56,10 @@ describe("atomic Gateway session initialization", () => {
         creation: creator,
         visibility: "restricted",
         roomKind: "channel",
-        members: [{ type: "profile", id: "profile-member" }],
+        members: [
+          { type: "profile", id: profileMember.id },
+          { type: "agent", id: "same-id" },
+        ],
       });
       expect(parent.ok).toBe(true);
       if (!parent.ok) {
@@ -55,11 +70,11 @@ describe("atomic Gateway session initialization", () => {
         cfg: {},
         key: "agent:main:private-thread",
         commandSource: "test",
-        creation: creator,
+        creation: { via: "spawn", actor: { type: "agent", id: "same-id" } },
         visibility: "restricted",
         roomKind: "thread",
         members: [
-          { type: "profile", id: "same-id" },
+          { type: "profile", id: threadProfileMember.id },
           { type: "agent", id: "same-id" },
         ],
         parentSessionKey: parent.key,
@@ -88,13 +103,41 @@ describe("atomic Gateway session initialization", () => {
         },
       });
       expect(
-        listSessionMembers({ agentId: thread.agentId, sessionKey: thread.key }).map(
-          (member) => member.identity,
-        ),
+        listSessionMembers({ agentId: thread.agentId, sessionKey: thread.key }),
       ).toEqual([
-        { type: "agent", id: "same-id" },
-        { type: "profile", id: "same-id" },
+        expect.objectContaining({
+          identity: { type: "agent", id: "same-id" },
+          addedBy: "same-id",
+        }),
+        expect.objectContaining({
+          identity: { type: "profile", id: threadProfileMember.id },
+          addedBy: "same-id",
+        }),
       ]);
+      expect(listSessionMembers({ agentId: parent.agentId, sessionKey: parent.key })).toEqual([
+        expect.objectContaining({
+          identity: { type: "agent", id: "same-id" },
+          addedBy: owner.id,
+        }),
+        expect.objectContaining({
+          identity: { type: "profile", id: profileMember.id },
+          addedBy: owner.id,
+        }),
+      ]);
+      expect(
+        await createGatewaySession({
+          cfg: {},
+          key: "agent:main:phantom-member-room",
+          commandSource: "test",
+          creation: creator,
+          visibility: "restricted",
+          roomKind: "group-dm",
+          members: [{ type: "profile", id: "phantom-profile" }],
+        }),
+      ).toMatchObject({
+        ok: false,
+        error: { message: "unknown restricted room member identity" },
+      });
       await expect(
         upsertSessionEntryCore(
           { agentId: thread.agentId, sessionKey: thread.key },

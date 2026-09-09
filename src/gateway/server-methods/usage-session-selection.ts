@@ -14,10 +14,12 @@ import { resolveExistingUsageSessionFile } from "../../infra/session-cost-usage.
 import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { resolvePreferredSessionKeyForSessionIdMatches } from "../../sessions/session-id-resolution.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
+import { createAuthorizedSessionListEntryFilter } from "../session-list-access.js";
 import {
   loadCombinedSessionStoreForGatewayCore,
   loadGatewaySessionEntryReadOnly,
 } from "../session-utils.js";
+import type { GatewayClient } from "./types.js";
 import {
   discoverAllSessionsForUsage,
   type UsageSessionSummaryTarget,
@@ -190,7 +192,7 @@ export async function selectUsageSessions(params: {
   groupingMode: UsageGroupingMode;
   startMs: number;
   endMs: number;
-  visibilityFilter?: (key: string, entry: SessionEntry) => boolean;
+  client?: GatewayClient | null;
 }): Promise<UsageSessionSelection[]> {
   const {
     config,
@@ -199,7 +201,7 @@ export async function selectUsageSessions(params: {
     groupingMode,
     startMs,
     endMs,
-    visibilityFilter,
+    client,
   } = params;
   // Load session store for named sessions only on a result-cache miss.
   const sessionStoreOpts = effectiveAgentId ? { agentId: effectiveAgentId } : {};
@@ -207,6 +209,12 @@ export async function selectUsageSessions(params: {
     config,
     sessionStoreOpts,
   );
+  const visibilityFilter = createAuthorizedSessionListEntryFilter({
+    cfg: config,
+    client: client ?? null,
+    store,
+    targetsBySessionKey,
+  });
   const scopedStore = Object.fromEntries(
     Object.entries(store).filter(
       ([key, entry]) =>

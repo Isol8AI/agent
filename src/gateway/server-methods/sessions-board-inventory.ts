@@ -2,7 +2,6 @@ import type { SessionsListParams } from "../../../packages/gateway-protocol/src/
 import { listBoardSessionKeysReadOnly } from "../../boards/sqlite-board-store.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { GatewayStoredSessionTargets } from "../../config/sessions/combined-store-gateway.js";
-import { prepareSessionSharing, resolveSessionVisibility } from "../session-sharing.js";
 
 function listBoardSessionKeys(targets: GatewayStoredSessionTargets): ReadonlySet<string> {
   const inventories = new Map<string, ReadonlySet<string>>();
@@ -26,26 +25,20 @@ function listBoardSessionKeys(targets: GatewayStoredSessionTargets): ReadonlySet
 }
 
 export function listFilter(input: {
-  cfg: Parameters<typeof prepareSessionSharing>[0]["cfg"];
-  client: Parameters<typeof prepareSessionSharing>[0]["client"];
+  accessFilter?: (key: string, entry: SessionEntry) => boolean;
   loaded: { targetsBySessionKey: GatewayStoredSessionTargets };
   options: { excludedKeys?: ReadonlySet<string> };
   p: SessionsListParams;
 }): ((key: string, entry: SessionEntry) => boolean) | undefined {
   const { loaded, p: params } = input;
-  const visibilityFilter = prepareSessionSharing({
-    client: input.client,
-    cfg: input.cfg,
-  }).entryFilter;
   const excludedKeys = input.options.excludedKeys;
   const boardSessionKeys =
     params.hasBoard === undefined ? undefined : listBoardSessionKeys(loaded.targetsBySessionKey);
-  if (!visibilityFilter && !boardSessionKeys && !excludedKeys?.size) {
+  if (!input.accessFilter && !boardSessionKeys && !excludedKeys?.size) {
     return undefined;
   }
   return (key, entry) =>
     !excludedKeys?.has(key) &&
-    (resolveSessionVisibility(entry) === "restricted" ||
-      (visibilityFilter?.(key, entry) ?? true)) &&
+    (input.accessFilter?.(key, entry) ?? true) &&
     (params.hasBoard === undefined || boardSessionKeys?.has(key) === params.hasBoard);
 }

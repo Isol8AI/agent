@@ -192,7 +192,19 @@ test("restricted reads require typed membership and never trust participant hist
   const participantId = ensureProfileForEmail("restricted-participant@example.test").id;
   const sessionKey = "agent:main:restricted-read-surfaces";
   const sessionId = "session-restricted-read-surfaces";
+  const parentKey = "agent:main:visible-parent";
+  const childKey = "agent:main:restricted-child";
+  const visibleOwnerId = ensureProfileForEmail("visible-owner@example.test").id;
   const storePath = resolveStorePath(undefined, { agentId: "main" });
+  await replaceSessionEntry(
+    { agentId: "main", sessionKey: parentKey, storePath },
+    {
+      sessionId: "session-visible-parent",
+      updatedAt: 40,
+      createdActor: { type: "human", source: "profile", id: visibleOwnerId },
+      visibility: "shared",
+    },
+  );
   await replaceSessionEntry(
     { agentId: "main", sessionKey, storePath },
     {
@@ -211,8 +223,28 @@ test("restricted reads require typed membership and never trust participant hist
     sessionKey,
     storePath,
   });
+  await replaceSessionEntry(
+    { agentId: "main", sessionKey: childKey, storePath },
+    {
+      sessionId: "session-restricted-child",
+      updatedAt: 43,
+      createdActor: { type: "human", source: "profile", id: ownerId },
+      visibility: "restricted",
+      roomKind: "thread",
+      parentSessionKey: parentKey,
+      sandbox: "required",
+    },
+  );
   addSessionMember(
     { agentId: "main", sessionKey, storePath },
+    {
+      identity: { type: "profile", id: memberId },
+      addedBy: ownerId,
+      addedAt: 1,
+    },
+  );
+  addSessionMember(
+    { agentId: "main", sessionKey: childKey, storePath },
     {
       identity: { type: "profile", id: memberId },
       addedBy: ownerId,
@@ -246,7 +278,17 @@ test("restricted reads require typed membership and never trust participant hist
         { query: "restricted search needle", sessionKeys: [sessionKey] },
         options,
       ),
-      listed: await listSessions({ client, context: requestContext(cfg), request: {} }),
+      listed: await listSessions({
+        client,
+        context: requestContext(cfg),
+        request: {
+          includePeople: true,
+          includeDerivedTitles: true,
+          includeLastMessage: true,
+          limit: 1,
+        },
+      }),
+      listedAll: await listSessions({ client, context: requestContext(cfg), request: {} }),
       previewed: await directSessionReq<{ previews: Array<{ key: string; status: string }> }>(
         "sessions.preview",
         { keys: [sessionKey] },
@@ -270,6 +312,10 @@ test("restricted reads require typed membership and never trust participant hist
     const hidden = await readFor(profileId);
     expect(hidden.searched.payload?.results).toEqual([]);
     expect(hidden.listed.sessions.some((session) => session.key === sessionKey)).toBe(false);
+    expect(hidden.listed).toMatchObject({ count: 1, totalCount: 1, nextOffset: null });
+    expect(JSON.stringify(hidden.listed)).not.toMatch(
+      new RegExp(`${ownerId}|${memberId}|${participantId}|${childKey}|restricted search needle`),
+    );
     expect(hidden.previewed.payload?.previews).toEqual([
       { key: sessionKey, status: "missing", items: [] },
     ]);
@@ -280,7 +326,7 @@ test("restricted reads require typed membership and never trust participant hist
 
   const visible = await readFor(memberId);
   expect(visible.searched.payload?.results.map((result) => result.sessionKey)).toEqual([sessionKey]);
-  expect(visible.listed.sessions.find((session) => session.key === sessionKey)).toMatchObject({
+  expect(visible.listedAll.sessions.find((session) => session.key === sessionKey)).toMatchObject({
     visibility: "restricted",
     roomKind: "group-dm",
     sharingRole: "member",

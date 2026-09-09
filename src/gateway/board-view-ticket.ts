@@ -7,6 +7,7 @@ import {
 import type { PluginRegistry } from "../plugins/registry-types.js";
 import { safeEqualSecret } from "../security/secret-equal.js";
 import type { GatewayContextResolver, GatewayRequestContext } from "./server-methods/types.js";
+import type { SessionBearerAccessBinding } from "./session-bearer-access.js";
 
 export const BOARD_HTTP_PATH_PREFIX = "/__openclaw__/board/";
 // Bounds residual bearer access after the originating client loses its view authority.
@@ -57,6 +58,7 @@ export type BoardViewTicketClaims = {
     pluginKind: string;
     scopedHostUrl: string;
   };
+  access?: SessionBearerAccessBinding;
 };
 
 function signTicketPayload(payload: string, secret: Buffer): string {
@@ -90,6 +92,15 @@ function isValidClaims(value: unknown): value is BoardViewTicketClaims {
     Number.isSafeInteger(claims.expiresAtMs) &&
     typeof claims.nonce === "string" &&
     /^[A-Za-z0-9_-]{32}$/u.test(claims.nonce) &&
+    (claims.access === undefined ||
+      (typeof claims.access === "object" &&
+        typeof claims.access.sessionId === "string" &&
+        claims.access.sessionId.length > 0 &&
+        (claims.access.admin === undefined || claims.access.admin === true) &&
+        (claims.access.reader === undefined ||
+          ((claims.access.reader.type === "profile" || claims.access.reader.type === "agent") &&
+            typeof claims.access.reader.id === "string" &&
+            claims.access.reader.id.length > 0)))) &&
     (claims.pluginFrame === undefined ||
       (typeof claims.pluginFrame === "object" &&
         typeof claims.pluginFrame.pluginKind === "string" &&
@@ -180,6 +191,7 @@ export function createBoardViewTicket(params: {
   viewGeneration: string;
   nowMs?: number;
   pluginFrame?: BoardViewTicketClaims["pluginFrame"];
+  access?: SessionBearerAccessBinding;
   authority: BoardViewTicketAuthorityInput;
 }): BoardViewTicket {
   const nowMs = params.nowMs ?? Date.now();
@@ -193,6 +205,7 @@ export function createBoardViewTicket(params: {
     authorityGeneration: authority.generation,
     expiresAtMs: nowMs + BOARD_VIEW_TICKET_TTL_MS,
     nonce: randomBytes(24).toString("base64url"),
+    ...(params.access ? { access: params.access } : {}),
     ...(params.pluginFrame ? { pluginFrame: params.pluginFrame } : {}),
   };
   if (!Number.isSafeInteger(nowMs) || !isValidClaims(claims)) {
