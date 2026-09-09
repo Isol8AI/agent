@@ -29,6 +29,12 @@ type DeviceAuthPayloadV4Params = DeviceAuthPayloadV3Params & {
   trustedBrokerProfileId: string;
 };
 
+const DEVICE_AUTH_UTF8_ENCODER = new TextEncoder();
+
+function encodeDeviceAuthV4Field(value: string): string {
+  return `${DEVICE_AUTH_UTF8_ENCODER.encode(value).byteLength}:${value}`;
+}
+
 export function buildDeviceAuthPayload(params: DeviceAuthPayloadParams): string {
   const scopes = params.scopes.join(",");
   const token = params.token ?? "";
@@ -67,24 +73,31 @@ export function buildDeviceAuthPayloadV3(params: DeviceAuthPayloadV3Params): str
   ].join("|");
 }
 
-/** Bind a trusted-broker profile assertion to the complete v3 connect proof. */
+/**
+ * Bind a trusted-broker profile assertion without delimiter ambiguity.
+ *
+ * After `v4|`, each field is `<decimal UTF-8 byte length>:<raw value>`, joined by `|`.
+ * The ordered fields are device, client id, client mode, role, decimal scope count, each scope in
+ * sent order, signed-at milliseconds, token, nonce, normalized platform, normalized device family,
+ * and trusted broker profile id.
+ */
 export function buildDeviceAuthPayloadV4(params: DeviceAuthPayloadV4Params): string {
-  const scopes = params.scopes.join(",");
   const token = params.token ?? "";
   const platform = normalizeDeviceMetadataForAuth(params.platform);
   const deviceFamily = normalizeDeviceMetadataForAuth(params.deviceFamily);
-  return [
-    "v4",
+  const fields = [
     params.deviceId,
     params.clientId,
     params.clientMode,
     params.role,
-    scopes,
+    String(params.scopes.length),
+    ...params.scopes,
     String(params.signedAtMs),
     token,
     params.nonce,
     platform,
     deviceFamily,
     params.trustedBrokerProfileId,
-  ].join("|");
+  ];
+  return `v4|${fields.map(encodeDeviceAuthV4Field).join("|")}`;
 }

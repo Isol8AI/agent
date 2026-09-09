@@ -9,7 +9,8 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { writeConfigFile } from "../config/config.js";
 import { loadOrCreateDeviceIdentity } from "../infra/device-identity.js";
 import { approveDevicePairing } from "../infra/device-pairing-approval.js";
-import { requestDevicePairing } from "../infra/device-pairing.js";
+import { revokeDeviceToken } from "../infra/device-pairing-tokens.js";
+import { getPairedDevice, requestDevicePairing } from "../infra/device-pairing.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import {
   BACKEND_GATEWAY_CLIENT,
@@ -65,12 +66,84 @@ describe("token-authenticated trusted broker profiles", () => {
         const hello = connected.payload as HelloOk;
         expect(hello.auth).not.toHaveProperty("token");
         expect(hello.auth).not.toHaveProperty("trustedBrokerProfileId");
+        expect(hello.auth).not.toHaveProperty("deviceToken");
+        expect(hello.auth).not.toHaveProperty("deviceTokens");
         expect(await rpcReq<UsersSelfResult>(ws, "users.self")).toMatchObject({
           ok: true,
           payload: { profile: { id: profile.id } },
         });
       } finally {
         ws.close();
+      }
+    });
+  });
+
+  test("rejects a mapped device without creating a missing pairing", async () => {
+    const deviceIdentityPath = identityPath("missing-pairing");
+    const device = loadOrCreateDeviceIdentity({ path: deviceIdentityPath });
+    const profile = ensureProfileForEmail("missing-pairing@example.com");
+    await configure({ [device.deviceId]: profile.id });
+
+    await withGatewayServer(async ({ port }) => {
+      const ws = await openWs(port);
+      try {
+        const connected = await connectReq(ws, {
+          token: TOKEN,
+          trustedBrokerProfileId: profile.id,
+          prePairDevice: false,
+          scopes: SCOPES,
+          client: BACKEND_GATEWAY_CLIENT,
+          deviceIdentityPath,
+        });
+        expect(connected.ok).toBe(false);
+        expect(connected.error?.message).toContain("existing paired device");
+        expect(await getPairedDevice(device.deviceId)).toBeNull();
+      } finally {
+        ws.close();
+      }
+    });
+  });
+
+  test("rejects a mapped device after its paired role token is revoked", async () => {
+    const deviceIdentityPath = identityPath("revoked-pairing");
+    const device = loadOrCreateDeviceIdentity({ path: deviceIdentityPath });
+    const profile = ensureProfileForEmail("revoked-pairing@example.com");
+    await configure({ [device.deviceId]: profile.id });
+
+    await withGatewayServer(async ({ port }) => {
+      const first = await openWs(port);
+      try {
+        const connected = await connectReq(first, {
+          token: TOKEN,
+          trustedBrokerProfileId: profile.id,
+          prePairDevice: true,
+          scopes: SCOPES,
+          client: BACKEND_GATEWAY_CLIENT,
+          deviceIdentityPath,
+        });
+        expect(connected.ok, JSON.stringify(connected.error)).toBe(true);
+      } finally {
+        first.close();
+      }
+
+      expect(
+        await revokeDeviceToken({ deviceId: device.deviceId, role: "operator" }),
+      ).toMatchObject({ ok: true });
+
+      const second = await openWs(port);
+      try {
+        const connected = await connectReq(second, {
+          token: TOKEN,
+          trustedBrokerProfileId: profile.id,
+          prePairDevice: false,
+          scopes: SCOPES,
+          client: BACKEND_GATEWAY_CLIENT,
+          deviceIdentityPath,
+        });
+        expect(connected.ok).toBe(false);
+        expect(connected.error?.message).toContain("existing paired device");
+      } finally {
+        second.close();
       }
     });
   });

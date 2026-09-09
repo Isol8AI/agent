@@ -466,6 +466,9 @@ async function authenticateGatewayConnectCore(
       return undefined;
     }
     trustedBrokerProfileId = assertedTrustedBrokerProfileId;
+    // A profile-bearing broker connect must never inherit the local backend
+    // shared-secret exception. Its distinct device needs an ordinary live pairing.
+    skipLocalBackendSelfPairing = false;
   }
   const boundBootstrapContext =
     authMethod === "bootstrap-token" && bootstrapTokenCandidate && device
