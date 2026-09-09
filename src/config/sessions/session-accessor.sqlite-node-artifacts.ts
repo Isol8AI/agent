@@ -164,7 +164,9 @@ export function copySessionNodeArtifactsForRepair(
         destinationDb
           .insertInto("session_members")
           .values({ ...member, session_key: canonicalKey })
-          .onConflict((conflict) => conflict.columns(["session_key", "identity_id"]).doNothing()),
+          .onConflict((conflict) =>
+            conflict.columns(["session_key", "identity_type", "identity_id"]).doNothing(),
+          ),
       );
     }
   }

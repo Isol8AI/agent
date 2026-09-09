@@ -115,6 +115,9 @@ export async function createSessionEntryWithTranscript<TError = string>(
     upserts: [{ sessionKey: normalizedKey, entry }],
     skipMaintenance: true,
     ...(commitGuard ? { beforeCommitInTransaction: commitGuard } : {}),
+    ...(options.afterEntryUpsertInTransaction
+      ? { afterUpsertsInTransaction: options.afterEntryUpsertInTransaction }
+      : {}),
   });
   return { ok: true, entry, sessionFile: normalizedKey };
 }

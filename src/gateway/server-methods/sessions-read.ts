@@ -44,7 +44,7 @@ import {
 } from "../session-request-agent.js";
 import {
   canAccessIncognitoSession,
-  createSessionListEntryFilter,
+  gatewayClientSessionMemberIdentity,
   isGatewayAdmin,
   prepareSessionSharing,
   resolveSessionSharingTarget,
@@ -95,22 +95,37 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const { agentId, configured, requestedAgentId, sessionKeys } = scope;
     const restrictIncognito =
       Boolean(gatewayClientSessionCreator(client)) && !isGatewayAdmin(client);
+    const sharing = prepareSessionSharing({ client, cfg });
     const roleVisibilityFilter = hasOperatorBoundary(client, cfg)
-      ? createSessionListEntryFilter({ client, cfg })
+      ? sharing.entryFilter
       : undefined;
-    const restrictVisibility = restrictIncognito || Boolean(roleVisibilityFilter);
-    const canSearchSessionKey = (sessionKey: string) => {
+    const restrictVisibility = restrictIncognito || !isGatewayAdmin(client);
+    const canSearchSessionKey = (sessionKey: string, sessionAgentId = agentId) => {
       if (
         isIncognitoSessionKey(sessionKey) &&
-        !canAccessIncognitoSession({ cfg, client: client ?? null, sessionKey, agentId })
+        !canAccessIncognitoSession({
+          cfg,
+          client: client ?? null,
+          sessionKey,
+          agentId: sessionAgentId,
+        })
       ) {
         return false;
       }
-      if (!roleVisibilityFilter) {
+      if (isGatewayAdmin(client)) {
         return true;
       }
-      const target = resolveSessionSharingTarget({ cfg, sessionKey, agentId });
-      return Boolean(target && roleVisibilityFilter(target.storeKey, target.entry));
+      const target = resolveSessionSharingTarget({
+        cfg,
+        sessionKey,
+        agentId: sessionAgentId,
+      });
+      return Boolean(
+        target &&
+          (resolveSessionVisibility(target.entry) === "restricted"
+            ? sharing.canReadTarget(target)
+            : (roleVisibilityFilter?.(target.storeKey, target.entry) ?? true)),
+      );
     };
     if (requestedAgentId && !params.sessionKeys && configured) {
       respond(
@@ -130,7 +145,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                 : resolveSessionStoreAgentId(cfg, sessionKey);
             return sessionAgentId === agentId;
           })
-    )?.filter(canSearchSessionKey);
+    )?.filter((sessionKey) => canSearchSessionKey(sessionKey));
     const searchTargets = configured
       ? [{ agentId, storePath: resolveSessionStorePathCore(cfg.session?.store, { agentId }) }]
       : resolveExistingAgentSessionStoreTargetsSync(cfg, agentId);
@@ -146,7 +161,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
             ? listSessionEntriesReadOnly({ agentId: target.agentId, storePath: target.storePath })
                 .map((entry) => entry.sessionKey)
                 .filter((sessionKey) => {
-                  if (!canSearchSessionKey(sessionKey)) {
+                  if (!canSearchSessionKey(sessionKey, target.agentId)) {
                     return false;
                   }
                   const parsed = parseAgentSessionKey(sessionKey);
@@ -204,6 +219,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const cfg = context.getRuntimeConfig();
     const configuredAgentsOnly = p.configuredAgentsOnly === true;
     const identityId = gatewayClientSessionCreator(client)?.id;
+    const memberIdentity = gatewayClientSessionMemberIdentity(client);
     const modelSelectionTarget = resolveGatewayModelSelectionPolicy({
       callerScopes: client?.connect?.scopes ?? [],
       cfg,
@@ -361,7 +377,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                 },
               );
               const resolvedMembershipKeys = new Set<string>();
-              if (identityId && !isGatewayAdmin(client)) {
+              if (memberIdentity && !isGatewayAdmin(client)) {
                 const groups = new Map<
                   string,
                   {
@@ -395,7 +411,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                       storePath: group.storePath,
                     },
                     group.sessionKeys,
-                    identityId,
+                    memberIdentity,
                   )) {
                     resolvedMembershipKeys.add(
                       `${group.agentId}\0${group.storePath}\0${sessionKey}`,
@@ -465,9 +481,9 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
           );
           // Reapply current visibility and activity after awaits; selected work may
           // settle or change ownership while its row is projected.
-          const currentVisibilityFilter = sharing.entryFilter;
+          const restrictCurrentVisibility = !isGatewayAdmin(client);
           const visibleSessions =
-            currentVisibilityFilter || p.activeOnly === true
+            restrictCurrentVisibility || p.activeOnly === true
               ? result.sessions.filter((session, index) => {
                   const target = sharingTargets[index];
                   if (
@@ -478,10 +494,20 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
                   ) {
                     return false;
                   }
-                  if (!currentVisibilityFilter) {
+                  if (!restrictCurrentVisibility) {
                     return true;
                   }
-                  return target ? currentVisibilityFilter(target.storeKey, target.entry) : false;
+                  if (!target) {
+                    return false;
+                  }
+                  return resolveSessionVisibility(target.entry) === "restricted"
+                    ? sharing.canReadTarget(
+                        target,
+                        membershipKeys.has(
+                          `${target.storeTarget.agentId}\0${target.storePath}\0${target.storeKey}`,
+                        ),
+                      )
+                    : (sharing.entryFilter?.(target.storeKey, target.entry) ?? true);
                 })
               : result.sessions;
           if (visibleSessions.length !== result.sessions.length) {
@@ -609,8 +635,9 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     }
 
     const cfg = context.getRuntimeConfig();
+    const sharing = prepareSessionSharing({ client, cfg });
     const roleVisibilityFilter = hasOperatorBoundary(client, cfg)
-      ? createSessionListEntryFilter({ client, cfg })
+      ? sharing.entryFilter
       : undefined;
     const previews: SessionsPreviewEntry[] = [];
 
@@ -633,7 +660,22 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
           readOnly: true,
         });
         const entry = resolveCanonicalSessionEntryFromStoreKeys(target.store, target.storeKeys);
-        if (!entry?.sessionId || roleVisibilityFilter?.(target.canonicalKey, entry) === false) {
+        const sharingTarget = entry
+          ? {
+              agentId: target.agentId,
+              canonicalKey: target.canonicalKey,
+              entry,
+              storeKey: target.canonicalKey,
+              storeKeys: target.storeKeys,
+              storePath: target.storePath,
+            }
+          : null;
+        const canRead =
+          sharingTarget &&
+          (resolveSessionVisibility(sharingTarget.entry) === "restricted"
+            ? sharing.canReadTarget(sharingTarget)
+            : (roleVisibilityFilter?.(sharingTarget.storeKey, sharingTarget.entry) ?? true));
+        if (!entry?.sessionId || !canRead) {
           previews.push({ key, status: "missing", items: [] });
           continue;
         }

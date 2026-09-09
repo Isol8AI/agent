@@ -20,7 +20,12 @@ import {
 import { parseControlUiSessionPullRequestsSubscribeParams } from "../control-ui-session-pr-subscriptions.js";
 import { requestCurrentGitHubOAuthRefresh } from "../github-oauth-lifecycle.js";
 import { resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId } from "../session-request-agent.js";
-import { createSessionListEntryFilter } from "../session-sharing.js";
+import {
+  createSessionListEntryFilter,
+  prepareSessionSharing,
+  resolveSessionSharingTarget,
+  resolveSessionVisibility,
+} from "../session-sharing.js";
 import { buildGatewaySessionRow } from "../session-utils.js";
 import { resolveAgentIdOrRespondError } from "./agent-id-shared.js";
 import { loadSessionEntriesForTarget } from "./sessions-shared.js";
@@ -167,7 +172,16 @@ function loadControlUiSessionPreview(
   // incognito/draft sharing predicate so a member cannot preview-by-key a
   // session the sidebar hides from them.
   const entryFilter = createSessionListEntryFilter({ client, cfg });
-  if (entryFilter && !entryFilter(target.canonicalKey, entry)) {
+  const sharingTarget = resolveSessionSharingTarget({
+    cfg,
+    sessionKey: target.canonicalKey,
+    agentId: target.agentId,
+  });
+  const hidden =
+    resolveSessionVisibility(entry) === "restricted"
+      ? !sharingTarget || !prepareSessionSharing({ client, cfg }).canReadTarget(sharingTarget)
+      : Boolean(entryFilter && !entryFilter(target.canonicalKey, entry));
+  if (hidden) {
     return null;
   }
   const row = buildGatewaySessionRow({

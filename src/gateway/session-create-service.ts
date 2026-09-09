@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { stableStringify } from "@openclaw/normalization-core";
 import {
@@ -10,7 +11,10 @@ import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
 import {
   ErrorCodes,
   type ErrorShape,
+  type RoomKind,
+  type SessionMemberIdentity,
   type SessionVisibility,
+  type ThreadOrigin,
   errorShape,
   missingScopeErrorShape,
   normalizeSessionColorValue,
@@ -38,9 +42,11 @@ import {
 } from "../auto-reply/reply/session-fork.js";
 import type {
   InternalSessionEntry,
+  PrivateRoomExecutionPolicy,
   SessionEntry,
   SessionToolOverrides,
 } from "../config/sessions.js";
+import { addInitialSessionMembersInTransaction } from "../config/sessions/session-sharing-store.js";
 import { resolveAgentMainSessionKey } from "../config/sessions/main-session.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import {
@@ -300,6 +306,10 @@ export async function createGatewaySession(params: {
   pendingWorktree?: InternalSessionEntry["pendingWorktree"];
   incognito?: boolean;
   visibility?: SessionVisibility;
+  /** Creation-only native product room classification and initial ACL. */
+  roomKind?: RoomKind;
+  members?: readonly SessionMemberIdentity[];
+  threadOrigin?: ThreadOrigin;
   /** Trusted catalog-owned model/runtime pair, persisted and locked together. */
   catalogTarget?: TrustedCatalogSessionTarget;
   parentSessionKey?: string;
@@ -371,6 +381,91 @@ export async function createGatewaySession(params: {
   commitGuard?: () => void;
 }): Promise<CreateGatewaySessionResult> {
   const { personalModelSelection, personalAccountDefaults } = params;
+  const hasRestrictedRoomContract =
+    params.visibility === "restricted" ||
+    params.roomKind !== undefined ||
+    params.members !== undefined ||
+    params.threadOrigin !== undefined;
+  if (
+    hasRestrictedRoomContract &&
+    (params.visibility !== "restricted" || !params.roomKind || !params.members)
+  ) {
+    return {
+      ok: false,
+      error: errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        "restricted room creation requires visibility, roomKind, and members",
+      ),
+    };
+  }
+  if (hasRestrictedRoomContract && params.fork === true) {
+    return {
+      ok: false,
+      error: errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        "restricted rooms use distinct transcripts and cannot fork a parent transcript",
+      ),
+    };
+  }
+  if (
+    hasRestrictedRoomContract &&
+    (params.incognito === true ||
+      params.spawnedCwd !== undefined ||
+      params.sessionRoot !== undefined ||
+      params.pendingWorktree !== undefined ||
+      params.pendingProjectGitUrl !== undefined ||
+      params.execNode !== undefined ||
+      params.prepareLifecycle !== undefined ||
+      params.catalogTarget !== undefined ||
+      params.initialEntry !== undefined ||
+      params.permissionMode !== undefined ||
+      params.toolOverrides !== undefined)
+  ) {
+    return {
+      ok: false,
+      error: errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        "restricted rooms use the server-owned private execution policy",
+      ),
+    };
+  }
+  if (params.roomKind !== "thread" && params.threadOrigin) {
+    return {
+      ok: false,
+      error: errorShape(ErrorCodes.INVALID_REQUEST, "threadOrigin requires roomKind thread"),
+    };
+  }
+  const roomCreator = params.creation?.actor;
+  const roomCreatorIdentity: SessionMemberIdentity | undefined =
+    roomCreator?.id && roomCreator.type === "human"
+      ? { type: "profile", id: roomCreator.id }
+      : roomCreator?.id && roomCreator.type === "agent"
+        ? { type: "agent", id: roomCreator.id }
+        : undefined;
+  if (hasRestrictedRoomContract && !roomCreatorIdentity) {
+    return {
+      ok: false,
+      error: errorShape(
+        ErrorCodes.INVALID_REQUEST,
+        "restricted room creation requires an authenticated profile or agent creator",
+      ),
+    };
+  }
+  const roomMembers = params.members?.map((identity) => ({
+    type: identity.type,
+    id: identity.id.trim(),
+  }));
+  if (
+    roomMembers?.some(
+      (identity) =>
+        (identity.type !== "profile" && identity.type !== "agent") || identity.id.length === 0,
+    )
+  ) {
+    return {
+      ok: false,
+      error: errorShape(ErrorCodes.INVALID_REQUEST, "invalid restricted room member identity"),
+    };
+  }
   const requestedProfile = splitTrailingAuthProfile(
     params.catalogTarget?.model ?? params.model ?? "",
   ).profile;
@@ -654,6 +749,31 @@ export async function createGatewaySession(params: {
       ...(parentSelectedAgentId ? { agentId: parentSelectedAgentId } : {}),
     });
   }
+  let roomThreadOrigin: ThreadOrigin | undefined;
+  if (params.roomKind === "thread") {
+    if (!canonicalParentSessionKey) {
+      return {
+        ok: false,
+        error: errorShape(ErrorCodes.INVALID_REQUEST, "thread rooms require parentSessionKey"),
+      };
+    }
+    if (
+      params.threadOrigin &&
+      params.threadOrigin.parentRoomKey !== parentSessionKey &&
+      params.threadOrigin.parentRoomKey !== canonicalParentSessionKey
+    ) {
+      return {
+        ok: false,
+        error: errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "threadOrigin parentRoomKey must identify parentSessionKey",
+        ),
+      };
+    }
+    roomThreadOrigin = params.threadOrigin
+      ? { ...params.threadOrigin, parentRoomKey: canonicalParentSessionKey }
+      : undefined;
+  }
   const parentIncognito =
     parentSessionEntry?.incognito === true || isIncognitoSessionKey(canonicalParentSessionKey);
   const incognito = params.incognito === true || parentIncognito;
@@ -824,6 +944,7 @@ export async function createGatewaySession(params: {
 
   let createdContext: CreatedGatewaySession | undefined;
   let createdNewEntry = false;
+  let createdRoomSessionId: string | undefined;
   let preparedLifecycle: PreparedGatewaySessionLifecycle | undefined;
   let lifecyclePreparationCommitted = false;
   const holdParentLifecycle =
@@ -1053,6 +1174,15 @@ export async function createGatewaySession(params: {
             ),
           };
         }
+        if (hasRestrictedRoomContract && existingEntry !== undefined) {
+          return {
+            ok: false,
+            error: errorShape(
+              ErrorCodes.INVALID_REQUEST,
+              "restricted room creation requires a new session",
+            ),
+          };
+        }
         if (params.catalogTarget && existingEntry !== undefined) {
           return {
             ok: false,
@@ -1229,6 +1359,24 @@ export async function createGatewaySession(params: {
         const catalogResolvedModel = params.catalogTarget
           ? resolveSessionModelRef(params.cfg, patched.entry, target.agentId)
           : undefined;
+        const privateRoomSessionRoot = hasRestrictedRoomContract
+          ? path.join(
+              resolveAgentDir(params.cfg, target.agentId),
+              "private-rooms",
+              patched.entry.sessionId,
+            )
+          : undefined;
+        const privateRoomExecutionPolicy: PrivateRoomExecutionPolicy | undefined =
+          privateRoomSessionRoot
+            ? {
+                isolationSubject: { type: "session", sessionId: patched.entry.sessionId },
+                sandbox: "required",
+                workspaceAccess: "none",
+                sessionRoot: privateRoomSessionRoot,
+                toolPolicyVersion: "private-room-v1",
+                allowedCapabilities: [],
+              }
+            : undefined;
         const initializedEntry: InternalSessionEntry = {
           ...patched.entry,
           ...(createdNewEntry && displayName ? { displayName } : {}),
@@ -1248,6 +1396,15 @@ export async function createGatewaySession(params: {
               })
             : {}),
           ...(params.visibility && createdNewEntry ? { visibility: params.visibility } : {}),
+          ...(params.roomKind && createdNewEntry && privateRoomExecutionPolicy
+            ? {
+                roomKind: params.roomKind,
+                ...(roomThreadOrigin ? { threadOrigin: roomThreadOrigin } : {}),
+                sandbox: "required" as const,
+                sessionRoot: privateRoomExecutionPolicy.sessionRoot,
+                privateRoomExecutionPolicy,
+              }
+            : {}),
           ...(projectId && createdNewEntry ? { projectId } : {}),
           ...(pendingProjectGitUrl && createdNewEntry ? { pendingProjectGitUrl } : {}),
           ...(params.pendingWorktree && createdNewEntry
@@ -1328,6 +1485,9 @@ export async function createGatewaySession(params: {
             : {}),
           ...(existingEntry === undefined && incognito ? { incognito: true as const } : {}),
         };
+        if (hasRestrictedRoomContract) {
+          createdRoomSessionId = initializedEntry.sessionId;
+        }
         const initialized = { ...patched, entry: initializedEntry };
         const explicitParentSessionKey =
           canonicalParentSessionKey ?? normalizeOptionalString(initializedEntry.parentSessionKey);
@@ -1460,6 +1620,28 @@ export async function createGatewaySession(params: {
           : {}),
         ...(commitGuard ? { commitGuard } : {}),
         ...(runtimeCwd ? { cwd: runtimeCwd } : {}),
+        ...(hasRestrictedRoomContract && roomCreatorIdentity && roomMembers
+          ? {
+              afterEntryUpsertInTransaction: (database) => {
+                if (!createdRoomSessionId) {
+                  throw new Error("restricted room session identity is unavailable");
+                }
+                addInitialSessionMembersInTransaction(
+                  database,
+                  {
+                    agentId: target.agentId,
+                    sessionKey: target.canonicalKey,
+                    storePath: target.storePath,
+                  },
+                  {
+                    identities: roomMembers,
+                    addedBy: `${roomCreatorIdentity.type}:${roomCreatorIdentity.id}`,
+                    expectedSessionId: createdRoomSessionId,
+                  },
+                );
+              },
+            }
+          : {}),
       },
     );
     if (!created.ok) {

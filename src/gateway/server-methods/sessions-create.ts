@@ -8,6 +8,7 @@ import {
   errorShape,
   missingScopeErrorShape,
   validateSessionsCreateParams,
+  validateSessionsRoomCreateParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
 import { insideGitCheckout } from "../../agents/worktrees/git.js";
@@ -83,6 +84,51 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       return;
     }
     const p = params;
+    const hasRestrictedRoomContract =
+      p.visibility === "restricted" ||
+      p.roomKind !== undefined ||
+      p.members !== undefined ||
+      p.threadOrigin !== undefined;
+    if (
+      hasRestrictedRoomContract &&
+      (p.visibility !== "restricted" || !p.roomKind || !p.members)
+    ) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "restricted room creation requires visibility, roomKind, and members",
+        ),
+      );
+      return;
+    }
+    if (
+      hasRestrictedRoomContract &&
+      (p.incognito === true ||
+        p.cwd !== undefined ||
+        p.worktree !== undefined ||
+        p.worktreeBaseRef !== undefined ||
+        p.worktreeName !== undefined ||
+        p.projectId !== undefined ||
+        p.projectGitUrl !== undefined ||
+        p.repository !== undefined ||
+        p.execNode !== undefined ||
+        p.catalogId !== undefined ||
+        p.mentions !== undefined ||
+        p.permissionMode !== undefined ||
+        p.toolOverrides !== undefined)
+    ) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "restricted rooms use the server-owned private execution policy",
+        ),
+      );
+      return;
+    }
     const parentSessionKey = normalizeOptionalString(p.parentSessionKey);
     const sessionCreation = prepareSkillLibrarySessionCreation(
       client,
@@ -188,6 +234,17 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       hasInitialTurn,
       message: initialMessage,
     } = initialTurn;
+    if (hasRestrictedRoomContract && hasInitialTurn) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "restricted room creation cannot start a model run; append content separately",
+        ),
+      );
+      return;
+    }
     const repositoryCreation = resolveSessionRepositoryCreation(p, hasInitialTurn);
     if (!repositoryCreation.ok) {
       respond(false, undefined, repositoryCreation.error);
@@ -572,6 +629,9 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
         ? { operatorRoleActor: client.internal.operatorRoleActor }
         : {}),
       visibility: p.visibility,
+      roomKind: p.roomKind,
+      members: p.members,
+      threadOrigin: p.threadOrigin,
       allowExistingModelSelection,
       parentSessionKey,
       spawnDepth: p.spawnDepth,
@@ -584,8 +644,8 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
                 : {}),
             }
           : undefined,
-      spawnedCwd: p.worktree === true ? undefined : sessionCwd,
-      sessionRoot: p.worktree === true ? undefined : sessionRoot,
+      spawnedCwd: p.worktree === true || hasRestrictedRoomContract ? undefined : sessionCwd,
+      sessionRoot: p.worktree === true || hasRestrictedRoomContract ? undefined : sessionRoot,
       permissionMode: p.permissionMode,
       ...(p.toolOverrides !== undefined ? { toolOverrides: p.toolOverrides } : {}),
       prepareLifecycle,
@@ -607,7 +667,7 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
       commandSource: "webchat",
       creation: sessionCreation,
       authorizedPluginId: normalizeOptionalString(client?.internal?.pluginRuntimeOwnerId),
-      armSessionDiffBaselineCapture: !repository,
+      armSessionDiffBaselineCapture: !repository && !hasRestrictedRoomContract,
       loadGatewayModelCatalog: () =>
         context.loadGatewayModelCatalog({ agentId: modelCatalogAgentId }),
       commitGuard,
@@ -710,3 +770,20 @@ export const sessionCreateHandlers: GatewayRequestHandlers = {
 sessionCreateHandlers["sessions.create"] = idempotentSessionCreate(
   expectDefined(sessionCreateHandlers["sessions.create"], "sessions.create handler"),
 );
+
+sessionCreateHandlers["sessions.room.create"] = async (options) => {
+  if (
+    !assertValidParams(
+      options.params,
+      validateSessionsRoomCreateParams,
+      "sessions.room.create",
+      options.respond,
+    )
+  ) {
+    return;
+  }
+  await expectDefined(
+    sessionCreateHandlers["sessions.create"],
+    "sessions.create handler",
+  )(options);
+};

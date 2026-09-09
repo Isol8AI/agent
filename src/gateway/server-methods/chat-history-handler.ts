@@ -465,7 +465,9 @@ async function handleChatHistoryRequest({
   const sharing = prepareSessionSharing({ client, cfg: currentSharingState?.cfg ?? cfg });
   if (
     sharingTarget &&
-    sharing.entryFilter?.(sharingTarget.storeKey, sharingTarget.entry) === false
+    (resolveSessionVisibility(sharingTarget.entry) === "restricted"
+      ? !sharing.canReadTarget(sharingTarget)
+      : sharing.entryFilter?.(sharingTarget.storeKey, sharingTarget.entry) === false)
   ) {
     respond(false, undefined, hiddenSessionNotFound(canonicalKey));
     return;

@@ -1,4 +1,5 @@
 import type { SessionTranscriptUpdate } from "../../sessions/transcript-events.js";
+import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import type { OpenClawConfig } from "../types.openclaw.js";
 import type {
   SessionTranscriptTurnMutation,
@@ -870,6 +871,8 @@ export type SessionEntryCreateWithTranscriptOptions = {
   requireWriteSuccess?: boolean;
   /** Synchronous caller-authority guard checked by the storage owner before commits. */
   commitGuard?: () => void;
+  /** Seeds entry-owned records inside the same transaction that publishes the session node. */
+  afterEntryUpsertInTransaction?: (database: OpenClawAgentDatabase) => void;
 };
 
 export type SessionPatchProjectionSnapshot = { store: Readonly<Record<string, SessionEntry>> };

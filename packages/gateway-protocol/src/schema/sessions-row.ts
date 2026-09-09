@@ -10,6 +10,7 @@ import {
   SessionParticipantIdentitySchema,
 } from "./session-participant.js";
 import { SessionSharingRoleSchema, SessionVisibilitySchema } from "./sessions-sharing-values.js";
+import { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";
 
 export const SessionPermissionModeSchema = Type.Union([
   Type.Literal("read-only"),
@@ -202,6 +203,10 @@ export const SessionRowSchema = Type.Object(
     ),
     participantCount: Type.Optional(Type.Integer({ minimum: 0 })),
     visibility: Type.Optional(SessionVisibilitySchema),
+    /** Immutable product room classification for native multiplayer sessions. */
+    roomKind: Type.Optional(RoomKindSchema),
+    /** Immutable parent-room origin metadata; never a cross-transcript parent pointer. */
+    threadOrigin: Type.Optional(ThreadOriginSchema),
     sharingRole: Type.Optional(SessionSharingRoleSchema),
     createdAt: Type.Optional(Type.Number()),
     forkSource: Type.Optional(

@@ -2,6 +2,7 @@ import {
   ErrorCodes,
   errorShape,
   type ErrorShape,
+  type SessionMemberIdentity,
   type SessionSharingRole,
   type SessionVisibility,
 } from "../../packages/gateway-protocol/src/index.js";
@@ -85,7 +86,7 @@ export function isSessionVisibilityAllowed(
   cfg: OpenClawConfig,
   visibility: SessionVisibility,
 ): boolean {
-  return allowedSessionVisibilities(cfg).includes(visibility);
+  return visibility === "restricted" || allowedSessionVisibilities(cfg).includes(visibility);
 }
 
 export function resolveSessionSharingTarget(params: {
@@ -147,6 +148,34 @@ export type SessionSharingRoleParams = {
   isMember?: boolean;
 };
 
+export function gatewayClientSessionMemberIdentity(
+  client: GatewayClient | null,
+  actor: ReturnType<typeof resolveGatewayOperatorRoleActor> =
+    resolveGatewayOperatorRoleActor(client),
+): SessionMemberIdentity | undefined {
+  const profileId =
+    gatewayClientSessionCreator(client)?.id ??
+    (actor?.kind === "operator" ? actor.profileId : undefined);
+  if (profileId) {
+    return { type: "profile", id: profileId };
+  }
+  const agentId = client?.internal?.agentRuntimeIdentity?.agentId?.trim();
+  return agentId ? { type: "agent", id: agentId } : undefined;
+}
+
+function isSessionCreatorIdentity(
+  actor: SessionSharingTarget["entry"]["createdActor"],
+  identity: SessionMemberIdentity | undefined,
+): boolean {
+  return Boolean(
+    actor?.id &&
+      identity &&
+      actor.id === identity.id &&
+      ((actor.type === "human" && identity.type === "profile") ||
+        (actor.type === "agent" && identity.type === "agent")),
+  );
+}
+
 export function sharingIdentity(
   client: GatewayClient | null,
   actor: ReturnType<typeof resolveGatewayOperatorRoleActor>,
@@ -167,6 +196,40 @@ export function resolveSessionSharingRole(
   }
   const operatorActor = resolveGatewayOperatorRoleActor(params.client);
   const identity = sharingIdentity(params.client, operatorActor);
+  const memberIdentity = gatewayClientSessionMemberIdentity(params.client, operatorActor);
+  const visibility = resolveSessionVisibility(params.target.entry);
+  if (visibility === "restricted") {
+    if (!memberIdentity) {
+      return "viewer";
+    }
+    const creatorMatches =
+      isCreator ??
+      (memberIdentity.type === "profile"
+        ? prepareSessionCreatorProfile(memberIdentity.id)
+        : (actor: SessionSharingTarget["entry"]["createdActor"]) =>
+            isSessionCreatorIdentity(actor, memberIdentity));
+    if (creatorMatches(params.target.entry.createdActor)) {
+      return "owner";
+    }
+    const sessionCap = preparedCap
+      ? preparedCap.value
+      : params.cfg && operatorSessionCap(params.client, params.cfg);
+    if (sessionCap === "none") {
+      return "viewer";
+    }
+    const member =
+      params.isMember ??
+      (params.includeMembership !== false &&
+        isSessionMember(
+          {
+            agentId: params.target.agentId,
+            sessionKey: params.target.storeKey,
+            storePath: params.target.storePath,
+          },
+          memberIdentity,
+        ));
+    return member ? "member" : "viewer";
+  }
   // Solo ownership is independent of the shared-secret connection's attribution profile.
   if (!identity) {
     return params.client?.authenticatedGitHubIdentitySync ||
@@ -183,7 +246,7 @@ export function resolveSessionSharingRole(
     : params.cfg && operatorSessionCap(params.client, params.cfg);
   if (
     sessionCap === "write" &&
-    resolveSessionVisibility(params.target.entry) !== "draft" &&
+    visibility !== "draft" &&
     params.target.entry.incognito !== true &&
     !isIncognitoSessionKey(params.target.canonicalKey)
   ) {
@@ -288,6 +351,16 @@ export function authorizeResolvedSessionMutation(params: {
   }
   const target = resolveSessionSharingTarget(params);
   if (target) {
+    if (resolveSessionVisibility(target.entry) === "restricted") {
+      const sharingError = authorizeSessionSharingTarget({
+        cfg: params.cfg,
+        client: params.client,
+        target,
+      });
+      if (sharingError) {
+        return sharingError;
+      }
+    }
     const agentError = authorizeSessionAgentRun({
       cfg: params.cfg,
       client: params.client,
@@ -311,6 +384,9 @@ export function authorizeResolvedSessionMutation(params: {
   if (!target) {
     return null;
   }
+  if (resolveSessionVisibility(target.entry) === "restricted") {
+    return null;
+  }
   return authorizeSessionSharingTarget({ cfg: params.cfg, client: params.client, target });
 }
 
@@ -326,6 +402,18 @@ export function authorizeSessionAgentRun(params: {
   });
   if (agentError) {
     return agentError;
+  }
+  if (resolveSessionVisibility(params.target.entry) === "restricted") {
+    return errorShape(
+      ErrorCodes.INVALID_REQUEST,
+      "private room execution is unavailable until its isolation policy is active",
+      {
+        details: {
+          code: "SESSION_PRIVATE_EXECUTION_UNAVAILABLE",
+          sessionKey: params.target.canonicalKey,
+        },
+      },
+    );
   }
   if (
     params.cfg.gateway?.roles &&
@@ -366,6 +454,35 @@ export function authorizeSessionSharingTarget(params: {
           visibility,
         },
       });
+}
+
+/** Read authorization preserves public visibility semantics and adds explicit restricted ACLs. */
+export function authorizeSessionReadTarget(params: {
+  cfg?: OpenClawConfig;
+  client: GatewayClient | null;
+  target: SessionSharingTarget;
+  isMember?: boolean;
+}): ErrorShape | null {
+  const visibility = resolveSessionVisibility(params.target.entry);
+  // Existing visibility modes retain their handler-specific proof-of-knowledge and
+  // discovery semantics. This centralized read gate adds only the restricted ACL.
+  if (visibility !== "restricted") {
+    return null;
+  }
+  const sessionCap = params.cfg && operatorSessionCap(params.client, params.cfg);
+  const role = resolveSessionSharingRole(
+    { ...params, isMember: params.isMember },
+    { value: sessionCap },
+  );
+  const readable =
+    role === "admin" || role === "owner" || (sessionCap !== "none" && role === "member");
+  return readable ? null : hiddenSessionNotFound(params.target.canonicalKey);
+}
+
+export function canReadSessionSharingTarget(
+  params: Parameters<typeof authorizeSessionReadTarget>[0],
+): boolean {
+  return authorizeSessionReadTarget(params) === null;
 }
 
 export function authorizeSessionSharing(

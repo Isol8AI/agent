@@ -412,6 +412,17 @@ export function writeSessionEntry(
     options.allowStoredAliases && options.previousEntry !== undefined
       ? (options.previousEntry ?? undefined)
       : readExactSessionEntryRow(database, sessionKey)?.entry;
+  if (canonicalPreviousEntry?.roomKind !== undefined) {
+    if (normalizedEntry.sessionId !== canonicalPreviousEntry.sessionId) {
+      throw new Error("Restricted room lifecycle replacement is unavailable");
+    }
+    normalizedEntry.visibility = "restricted";
+    normalizedEntry.roomKind = canonicalPreviousEntry.roomKind;
+    normalizedEntry.threadOrigin = canonicalPreviousEntry.threadOrigin;
+    normalizedEntry.sandbox = "required";
+    normalizedEntry.privateRoomExecutionPolicy =
+      canonicalPreviousEntry.privateRoomExecutionPolicy;
+  }
   if (canonicalPreviousEntry?.sandbox === "required") {
     if (
       normalizedEntry.sandbox !== "required" ||

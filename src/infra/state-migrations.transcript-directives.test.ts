@@ -513,7 +513,7 @@ describe("historical transcript directive migration", () => {
     expect(result.warnings).toEqual([]);
     const migrated = openNodeSqliteDatabase(databasePath, { readOnly: true });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(19);
+      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(20);
     } finally {
       migrated.close();
     }
@@ -688,7 +688,7 @@ describe("historical transcript directive migration", () => {
     expect(result.warnings.some((warning) => warning.includes("preflight"))).toBe(true);
     const migrated = openNodeSqliteDatabase(databasePath, { readOnly: true });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(19);
+      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(20);
     } finally {
       migrated.close();
     }
@@ -976,7 +976,7 @@ describe("historical transcript directive migration", () => {
     });
     const migrated = openNodeSqliteDatabase(opened.path, { readOnly: true });
     try {
-      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(19);
+      expect(migrated.prepare("PRAGMA user_version").get()?.user_version).toBe(20);
     } finally {
       migrated.close();
     }

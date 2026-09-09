@@ -2,7 +2,7 @@ import type { SessionsListParams } from "../../../packages/gateway-protocol/src/
 import { listBoardSessionKeysReadOnly } from "../../boards/sqlite-board-store.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import type { GatewayStoredSessionTargets } from "../../config/sessions/combined-store-gateway.js";
-import { prepareSessionSharing } from "../session-sharing.js";
+import { prepareSessionSharing, resolveSessionVisibility } from "../session-sharing.js";
 
 function listBoardSessionKeys(targets: GatewayStoredSessionTargets): ReadonlySet<string> {
   const inventories = new Map<string, ReadonlySet<string>>();
@@ -45,6 +45,7 @@ export function listFilter(input: {
   }
   return (key, entry) =>
     !excludedKeys?.has(key) &&
-    (visibilityFilter?.(key, entry) ?? true) &&
+    (resolveSessionVisibility(entry) === "restricted" ||
+      (visibilityFilter?.(key, entry) ?? true)) &&
     (params.hasBoard === undefined || boardSessionKeys?.has(key) === params.hasBoard);
 }

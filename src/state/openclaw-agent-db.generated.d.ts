@@ -259,6 +259,7 @@ export interface SessionKeyContract {
 export interface SessionMembers {
   added_at: number;
   added_by: string;
+  identity_type: string;
   identity_id: string;
   session_key: string;
 }

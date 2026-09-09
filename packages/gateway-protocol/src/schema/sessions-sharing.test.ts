@@ -8,6 +8,7 @@ import {
   SessionSharingEventSchema,
   SessionVisibilitySetParamsSchema,
 } from "./sessions-sharing.js";
+import { SESSION_VISIBILITY_VALUES } from "./sessions-sharing-values.js";
 
 const baseEvent = {
   action: "visibility",
@@ -32,9 +33,22 @@ describe("session sharing protocol", () => {
       }),
     ).toBe(true);
     expect(
+      Value.Check(SessionMemberAddParamsSchema, {
+        sessionKey: "agent:main:main",
+        identity: { type: "agent", id: "researcher" },
+      }),
+    ).toBe(true);
+    expect(
       Value.Check(SessionMembersListResultSchema, {
         sessionKey: "agent:main:main",
-        members: [{ identityId: "alice", addedBy: "profile-ada", addedAt: 1 }],
+        members: [
+          {
+            identity: { type: "profile", id: "alice" },
+            identityId: "alice",
+            addedBy: "profile-ada",
+            addedAt: 1,
+          },
+        ],
         identities: [],
         role: "owner",
         allowedVisibilities: ["shared", "read-only", "suggest", "draft"],
@@ -43,16 +57,37 @@ describe("session sharing protocol", () => {
     expect(
       Value.Check(SessionMembersListResultSchema, {
         sessionKey: "agent:main:main",
-        members: [{ identityId: "bob", addedByState: "unknown", addedAt: 2 }],
+        members: [
+          {
+            identity: { type: "profile", id: "bob" },
+            identityId: "bob",
+            addedByState: "unknown",
+            addedAt: 2,
+          },
+        ],
         identities: [],
         role: "owner",
         allowedVisibilities: [],
       }),
     ).toBe(false);
     for (const member of [
-      { identityId: "alice", addedBy: "profile-ada", addedAt: 1 },
-      { identityId: "bob", addedByState: "unknown", addedAt: 2 },
-      { identityId: "carol", addedAt: 3 },
+      {
+        identity: { type: "profile", id: "alice" },
+        identityId: "alice",
+        addedBy: "profile-ada",
+        addedAt: 1,
+      },
+      {
+        identity: { type: "profile", id: "bob" },
+        identityId: "bob",
+        addedByState: "unknown",
+        addedAt: 2,
+      },
+      {
+        identity: { type: "profile", id: "carol" },
+        identityId: "carol",
+        addedAt: 3,
+      },
     ]) {
       expect(
         Value.Check(SessionMembersListEvidenceResultSchema, {
@@ -69,6 +104,7 @@ describe("session sharing protocol", () => {
         sessionKey: "agent:main:main",
         members: [
           {
+            identity: { type: "profile", id: "mixed" },
             identityId: "mixed",
             addedBy: "profile-ada",
             addedByState: "unknown",
@@ -78,6 +114,22 @@ describe("session sharing protocol", () => {
         identities: [],
         role: "owner",
         allowedVisibilities: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("exposes restricted visibility and closed typed member identities", () => {
+    expect(SESSION_VISIBILITY_VALUES).toContain("restricted");
+    expect(
+      Value.Check(SessionVisibilitySetParamsSchema, {
+        sessionKey: "agent:main:private-room",
+        visibility: "restricted",
+      }),
+    ).toBe(true);
+    expect(
+      Value.Check(SessionMemberAddParamsSchema, {
+        sessionKey: "agent:main:private-room",
+        identity: { type: "profile", id: "profile-alice", namespace: "forbidden" },
       }),
     ).toBe(false);
   });

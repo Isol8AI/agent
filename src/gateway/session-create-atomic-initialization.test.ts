@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   loadSessionEntryReadOnly,
   loadTranscriptEvents,
+  upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
+import { listSessionMembers } from "../config/sessions/session-sharing-store.js";
 import { withSessionTranscriptWriteLock } from "../plugin-sdk/session-transcript-runtime.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { createGatewaySession } from "./session-create-service.js";
@@ -29,6 +31,84 @@ async function appendImportedMessage(params: {
 }
 
 describe("atomic Gateway session initialization", () => {
+  it("creates a restricted thread and its typed ACL as one distinct room node", async () => {
+    await withOpenClawTestState({ label: "atomic-restricted-room" }, async () => {
+      const creator = {
+        via: "operator" as const,
+        actor: { type: "human" as const, source: "profile" as const, id: "profile-owner" },
+      };
+      const parent = await createGatewaySession({
+        cfg: {},
+        key: "agent:main:private-parent",
+        commandSource: "test",
+        creation: creator,
+        visibility: "restricted",
+        roomKind: "channel",
+        members: [{ type: "profile", id: "profile-member" }],
+      });
+      expect(parent.ok).toBe(true);
+      if (!parent.ok) {
+        throw new Error(parent.error.message);
+      }
+
+      const thread = await createGatewaySession({
+        cfg: {},
+        key: "agent:main:private-thread",
+        commandSource: "test",
+        creation: creator,
+        visibility: "restricted",
+        roomKind: "thread",
+        members: [
+          { type: "profile", id: "same-id" },
+          { type: "agent", id: "same-id" },
+        ],
+        parentSessionKey: parent.key,
+        threadOrigin: { parentRoomKey: parent.key, originRootMessageId: "message-root" },
+      });
+      expect(thread.ok).toBe(true);
+      if (!thread.ok) {
+        throw new Error(thread.error.message);
+      }
+      expect(thread.entry.sessionId).not.toBe(parent.entry.sessionId);
+      expect(thread.entry).toMatchObject({
+        visibility: "restricted",
+        roomKind: "thread",
+        parentSessionKey: parent.key,
+        threadOrigin: { parentRoomKey: parent.key, originRootMessageId: "message-root" },
+        sandbox: "required",
+      });
+      const stored = loadSessionEntryReadOnly({ sessionKey: thread.key });
+      expect(stored).toMatchObject({
+        privateRoomExecutionPolicy: {
+          isolationSubject: { type: "session", sessionId: thread.entry.sessionId },
+          sandbox: "required",
+          workspaceAccess: "none",
+          toolPolicyVersion: "private-room-v1",
+          allowedCapabilities: [],
+        },
+      });
+      expect(
+        listSessionMembers({ agentId: thread.agentId, sessionKey: thread.key }).map(
+          (member) => member.identity,
+        ),
+      ).toEqual([
+        { type: "agent", id: "same-id" },
+        { type: "profile", id: "same-id" },
+      ]);
+      await expect(
+        upsertSessionEntryCore(
+          { agentId: thread.agentId, sessionKey: thread.key },
+          {
+            sessionId: "replacement-session",
+            updatedAt: Date.now(),
+            visibility: "shared",
+            roomKind: "dm",
+          },
+        ),
+      ).rejects.toThrow("Restricted room lifecycle replacement is unavailable");
+    });
+  });
+
   it("publishes a usable session only after its transcript initializer succeeds", async () => {
     await withOpenClawTestState({ label: "atomic-session-success" }, async () => {
       let transcriptScope:

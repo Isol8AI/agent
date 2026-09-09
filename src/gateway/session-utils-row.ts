@@ -363,6 +363,8 @@ export function buildGatewaySessionRow(params: {
     // Presence records a completed registry projection; event merges may clear only that fact.
     ...(rowContext ? { swarm } : {}),
     visibility: entry ? (entry.visibility ?? "shared") : undefined,
+    roomKind: entry?.roomKind,
+    threadOrigin: entry?.threadOrigin,
     incognito: entry?.incognito,
     spawnedBy: subagentOwner || entry?.spawnedBy,
     // The live registry controller takes precedence over the persisted spawner.

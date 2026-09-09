@@ -293,7 +293,7 @@ export type RestartRecoveryRun = {
 
 type SessionEntryCore = SessionRestartRecoveryState &
   SessionEntryProvenance &
-  Pick<SessionRow, "permissionMode" | "sessionRoot"> & {
+  Pick<SessionRow, "permissionMode" | "roomKind" | "sessionRoot" | "threadOrigin"> & {
     /** Collaboration mode. Missing legacy values are equivalent to "shared". */
     visibility?: SessionVisibility;
     /**
@@ -618,8 +618,19 @@ type SessionEntryCore = SessionRestartRecoveryState &
 
 export interface SessionEntry extends SessionEntryCore {}
 
+export type PrivateRoomExecutionPolicy = {
+  isolationSubject: { type: "session"; sessionId: string };
+  sandbox: "required";
+  workspaceAccess: "none";
+  sessionRoot: string;
+  toolPolicyVersion: "private-room-v1";
+  allowedCapabilities: readonly string[];
+};
+
 /** Internal durable fields excluded from public/plugin session projections. */
 export type InternalSessionEntryCore = SessionEntryCore & {
+  /** Immutable fail-closed policy selected with an atomic restricted-room creation. */
+  privateRoomExecutionPolicy?: PrivateRoomExecutionPolicy;
   /** Transcript-wide account provenance; native binding replacement must not replace it. */
   cliHistoryBoundary?: import("./cli-history-boundary.js").CliHistoryBoundary;
   /** Explicit world-readable publication, bound to one transcript generation. */
@@ -825,6 +836,11 @@ function mergeSessionEntryWithPolicy(
   }
   if (existing.forkSource !== undefined) {
     next.forkSource = existing.forkSource;
+  }
+  if (existing.roomKind !== undefined) {
+    next.visibility = "restricted";
+    next.roomKind = existing.roomKind;
+    next.threadOrigin = existing.threadOrigin;
   }
 
   // Guard against stale provider carry-over when callers patch runtime model

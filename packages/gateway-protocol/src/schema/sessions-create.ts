@@ -8,7 +8,10 @@ import {
   SessionRepositorySourceSchema,
   SessionToolOverridesSchema,
 } from "./sessions-row.js";
-import { SessionVisibilitySchema } from "./sessions-sharing-values.js";
+import { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";
+import { SessionMemberIdentitySchema, SessionVisibilitySchema } from "./sessions-sharing-values.js";
+
+export { RoomKindSchema, ThreadOriginSchema } from "./sessions-room-values.js";
 
 export const SESSION_CREATE_RETRY_WINDOW_MS = 4 * 60_000;
 export const SESSION_CREATE_IDEMPOTENCY_RETENTION_MS = 5 * 60_000;
@@ -36,6 +39,10 @@ export const SessionsCreateParamsSchema = closedObject({
   toolOverrides: Type.Optional(SessionToolOverridesSchema),
   incognito: Type.Optional(Type.Boolean()),
   visibility: Type.Optional(SessionVisibilitySchema),
+  /** Restricted-room fields are accepted only as one complete creation contract. */
+  roomKind: Type.Optional(RoomKindSchema),
+  members: Type.Optional(Type.Array(SessionMemberIdentitySchema, { maxItems: 128 })),
+  threadOrigin: Type.Optional(ThreadOriginSchema),
   catalogId: Type.Optional(NonEmptyString),
   parentSessionKey: Type.Optional(NonEmptyString),
   spawnDepth: Type.Optional(
@@ -107,4 +114,13 @@ export const SessionsCreateParamsSchema = closedObject({
         "Absolute Gateway working directory, managed-worktree source directory, or working directory on execNode. Gateway paths outside configured agent workspaces and all execNode paths require operator.admin.",
     }),
   ),
+});
+
+/** Creates a new restricted room and its complete initial ACL in one storage commit. */
+export const SessionsRoomCreateParamsSchema = closedObject({
+  ...SessionsCreateParamsSchema.properties,
+  visibility: Type.Literal("restricted"),
+  roomKind: RoomKindSchema,
+  members: Type.Array(SessionMemberIdentitySchema, { maxItems: 128 }),
+  threadOrigin: Type.Optional(ThreadOriginSchema),
 });
