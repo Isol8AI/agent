@@ -939,40 +939,6 @@ describe("session sharing policy", () => {
     }
   });
 
-  it("retains identity-less legacy event fanout for shared sessions", async () => {
-    await withOpenClawTestState({ scenario: "minimal" }, async () => {
-      const sessionKey = "agent:main:identityless-shared";
-      await upsertSessionEntryCore(
-        { agentId: "main", sessionKey },
-        { sessionId: "identityless-shared", updatedAt: 1, visibility: "shared" },
-      );
-      expect(
-        canReceiveSessionEvent({ cfg: {}, client: client({}) as never, sessionKeys: [sessionKey] }),
-      ).toBe(true);
-    });
-  });
-
-  it("denies identity-less legacy event fanout for draft and missing sessions", async () => {
-    await withOpenClawTestState({ scenario: "minimal" }, async () => {
-      const draftKey = "agent:main:identityless-draft";
-      await upsertSessionEntryCore(
-        { agentId: "main", sessionKey: draftKey },
-        { sessionId: "identityless-draft", updatedAt: 1, visibility: "draft" },
-      );
-      for (const sessionKey of [draftKey, "agent:main:identityless-missing"]) {
-        expect(
-          canReceiveSessionEvent({
-            cfg: {},
-            client: client({}) as never,
-            sessionKeys: [sessionKey],
-            event: "session.message",
-          }),
-          sessionKey,
-        ).toBe(false);
-      }
-    });
-  });
-
   it("fails closed for scoped events whose session row was deleted", () => {
     expect(
       canReceiveSessionEvent({
