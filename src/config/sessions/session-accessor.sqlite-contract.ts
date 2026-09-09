@@ -30,6 +30,8 @@ export type SessionTranscriptInstance = SessionEntrySummary & {
   acpOwned: boolean;
   /** True when exclusion-sensitive session ownership was captured for this transcript id. */
   provenanceKnown: boolean;
+  /** True or absent denies global memory; false requires a durable ordinary-room classification. */
+  memoryRestricted?: boolean;
   /** Activity timestamp for this transcript instance, not the current logical session row. */
   updatedAtMs: number;
   /** Recorded source facts; coarse historical trust classes cannot identify an exact hook source. */

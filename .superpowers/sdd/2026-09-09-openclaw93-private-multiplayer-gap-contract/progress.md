@@ -24,3 +24,10 @@ Task 3: active from stacked base `9882de4e5d` (`codex/openclaw-room-isolation-pr
 - Native presence v1 uses the existing Gateway lifecycle and subscription paths, bounded ephemeral leases and tombstones, authenticated profile intents, runtime-owned agent signals, server epoch plus monotonic elapsed time, and complete/incomplete/failed snapshot reconciliation. Viewing declarations and subscriptions remain independent.
 - Local validation remains forbidden and was not executed. Focused tests were added as source only. No test/lint/typecheck/build/check/formatting-check/autoreview command ran. Only the authorized deterministic Swift/Kotlin protocol source generators ran, to update their committed artifacts; no formatter or JSON build-artifact generator ran.
 - Implementation stays on `9882de4e5d5d4db76cdd2bb168af323e188a83fe`; no rebase/merge/cherry-pick/push occurred. Parent owns transplanting onto the final lower Task 2 stack and the GitHub CI gate.
+
+## Task 3 independent-review corrections
+
+- Authenticated committed room input is literal model input, never a Gateway reset or embedded slash command. Reuse the private execution context and existing `expandPromptTemplates: false`; keep ordinary chat and inference/admission/billing unchanged.
+- Archive privacy must survive complete logical-room/window deletion. Carry a sticky nullable privacy classification through the existing window and canonical archive rows, and copy it before deletion inside the same transaction.
+- Parent ruling: unknown archive privacy is never public. Exclude legacy registered rows without recoverable classification and filename-only artifacts from global indexing/dreaming; preserve durably ordinary registered archives. Do not infer privacy from filenames or later live metadata. The historical-memory coverage reduction is intentional; no archive files are removed.
+- No local validation ran. Added source regressions and ran only the required deterministic Kysely type and SQLite schema-baseline write generators; see the report for artifacts and remaining CI coverage.

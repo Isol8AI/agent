@@ -13,7 +13,6 @@ import {
   listSessionEntries,
   listSessionTranscriptArchivesReadOnly,
   listSessionTranscriptInstances,
-  parseUsageCountedSessionIdFromFileName,
   readTranscriptContentRevisionSync,
   resolveSessionAgentId,
   resolveSessionTranscriptsDirForAgent,
@@ -357,7 +356,7 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     readOnly: options.readOnly === true,
     storePath,
   });
-  // Retained policy metadata also fences archive artifacts after room deletion.
+  // Durable window privacy fences retained content independently from the current logical row.
   const retainedInstances = listSessionTranscriptInstances({
     agentId: normalizedAgentId,
     hydrateSkillPromptRefs: false,
@@ -370,7 +369,10 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
         .filter(({ entry }) => entry.visibility === "restricted")
         .map(({ entry }) => entry.sessionId),
       ...retainedInstances
-        .filter(({ entry }) => entry.visibility === "restricted")
+        .filter(
+          ({ entry, memoryRestricted }) =>
+            entry.visibility === "restricted" || memoryRestricted !== false,
+        )
         .map(({ sessionId }) => sessionId),
     ],
   );
@@ -427,7 +429,6 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
       activeEntriesBySessionId.set(entry.sessionId, entry);
     }
   }
-  const includeUnownedArtifacts = !isSharedFixedStore;
   const corpusEntries = [...activeEntriesBySessionId.values()];
   if (options.includeRetainedSqlite) {
     for (const instance of retainedInstances) {
@@ -468,17 +469,18 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
   for (const artifactPath of artifactPaths) {
     const artifactName = path.basename(artifactPath);
     const archivedIdentity = archivedIdentitiesByName.get(artifactName);
-    const primarySessionId =
-      archivedIdentity?.sessionId ?? parseUsageCountedSessionIdFromFileName(artifactName);
+    // Names and live rows cannot prove an archive's privacy after its owner is deleted.
+    // Unregistered legacy files and unknown legacy rows are both excluded.
+    if (!archivedIdentity || archivedIdentity.memoryRestricted !== 0) {
+      continue;
+    }
+    const primarySessionId = archivedIdentity.sessionId;
     if (!primarySessionId || privateSessionIds.has(primarySessionId)) {
       continue;
     }
     const primaryEntry = activeEntriesBySessionId.get(primarySessionId);
     const primaryOwner = entryOwnersBySessionId.get(primarySessionId);
     if (primaryOwner && primaryOwner !== normalizedAgentId) {
-      continue;
-    }
-    if (!primaryOwner && !archivedIdentity && !includeUnownedArtifacts) {
       continue;
     }
     corpusEntries.push({

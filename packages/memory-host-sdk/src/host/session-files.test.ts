@@ -11,6 +11,9 @@ import { markInboundContextLabel } from "../../../../src/auto-reply/reply/inboun
 import { encodeSessionArchiveContent } from "../../../../src/config/sessions/archive-compression.js";
 import {
   appendTranscriptMessage,
+  deleteSessionEntryLifecycle,
+  listSessionTranscriptInstances,
+  loadSessionEntry,
   persistSessionTranscriptTurn,
   resetSessionEntryLifecycle,
   upsertSessionEntryCore,
@@ -86,7 +89,7 @@ async function upsertTestSessionEntries(
 }
 
 describe("session transcript archive discovery", () => {
-  it("includes reset and deleted transcripts in session file listing", async () => {
+  it("excludes filename-only reset and deleted archives without durable privacy classification", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     fsSync.mkdirSync(path.join(sessionsDir, "archive"), { recursive: true });
 
@@ -115,13 +118,44 @@ describe("session transcript archive discovery", () => {
 
     const entries = await listSessionTranscriptCorpusEntriesForAgent("main");
 
-    expect(entries.map((entry) => path.basename(entry.sessionFile)).toSorted()).toEqual(
-      included.toSorted(),
-    );
+    expect(entries).toEqual([]);
   });
 });
 
 describe("listSessionTranscriptCorpusEntriesForAgent", () => {
+  it.each([true, false])(
+    "retains archive privacy after deleting the room and every window (restricted=%s)",
+    async (restricted) => {
+      const scope = { agentId: "main", sessionKey: "agent:main:room", sessionId: "deleted-room" };
+      await upsertSessionEntryCore(scope, {
+        sessionId: scope.sessionId,
+        updatedAt: 1,
+        ...(restricted ? { visibility: "restricted" as const } : {}),
+      });
+      await appendTranscriptMessage(scope, {
+        message: { role: "user", content: "Archived room contribution" },
+      });
+      const deleted = await deleteSessionEntryLifecycle({
+        agentId: scope.agentId,
+        target: { canonicalKey: scope.sessionKey, storeKeys: [scope.sessionKey] },
+        archiveTranscript: true,
+      });
+      expect(deleted.deleted).toBe(true);
+      expect(deleted.archivedTranscripts).toHaveLength(1);
+      expect(loadSessionEntry(scope)).toBeUndefined();
+      expect(listSessionTranscriptInstances({ agentId: "main" })).toEqual([]);
+      const archivePath = deleted.archivedTranscripts[0]!.archivedPath!;
+      expect(fsSync.existsSync(archivePath)).toBe(true);
+      // Reopen so neither the live node nor an in-process cache can classify this archive.
+      closeOpenClawAgentDatabasesForTest();
+      const entries = await listSessionTranscriptCorpusEntriesForAgent("main", {
+        includeRetainedSqlite: true,
+        readOnly: true,
+      });
+      expect(entries.map((entry) => entry.sessionFile)).toEqual(restricted ? [] : [archivePath]);
+    },
+  );
+
   it("excludes restricted room transcripts from the global indexing and dreaming corpus", async () => {
     const scope = { agentId: "main", sessionKey: "agent:main:room", sessionId: "private-room" };
     await upsertSessionEntryCore(scope, {
@@ -237,7 +271,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     );
   });
 
-  it("keeps archive artifacts in the corpus and inherits active session classification", async () => {
+  it("does not borrow active session classification for an unregistered archive", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     fsSync.mkdirSync(sessionsDir, { recursive: true });
     const activePath = path.join(sessionsDir, "cron-run.jsonl");
@@ -252,18 +286,11 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
       },
     });
 
-    await expect(listSessionTranscriptCorpusEntriesForAgent("main")).resolves.toContainEqual({
-      agentId: "main",
-      artifactKind: "archive-artifact",
-      contentRevision: expect.any(String),
-      generatedByCronRun: true,
-      sessionKind: "cron",
-      sessionFile: archivePath,
-      sessionId: "cron-run",
-    });
+    const entries = await listSessionTranscriptCorpusEntriesForAgent("main");
+    expect(entries.filter((entry) => entry.artifactKind === "archive-artifact")).toEqual([]);
   });
 
-  it("reads live SQLite rows by session identity while preserving archived JSONL artifacts", async () => {
+  it("reads live SQLite rows while excluding unregistered JSONL artifacts from discovery", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     const storePath = path.join(sessionsDir, "sessions.json");
     const sessionKey = "agent:main:chat:sqlite-live:heartbeat";
@@ -318,15 +345,9 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
           updatedAtMs: expect.any(Number),
           sessionKind: "interactive",
         }),
-        expect.objectContaining({
-          agentId: "main",
-          artifactKind: "archive-artifact",
-          contentRevision: expect.any(String),
-          sessionFile: archivePath,
-          sessionId,
-        }),
       ]),
     );
+    expect(entries.some((entry) => entry.sessionFile === archivePath)).toBe(false);
 
     const liveEntry = requireSessionEntry(
       await buildSessionEntry(sessionKey, {
@@ -360,7 +381,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     expect(archiveEntry.content).toBe("User: Archived JSONL transcript text");
   });
 
-  it("exposes content revisions that change with SQLite appends and file replacement", async () => {
+  it("updates live revisions without admitting unclassified replacement files", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     const storePath = path.join(sessionsDir, "sessions.json");
     const sessionKey = "agent:main:chat:revision";
@@ -388,7 +409,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     const beforeLive = before.find((entry) => entry.transcriptSource === "sqlite");
     const beforeArchive = before.find((entry) => entry.sessionFile === archivePath);
     expect(beforeLive?.contentRevision).toEqual(expect.any(String));
-    expect(beforeArchive?.contentRevision).toEqual(expect.any(String));
+    expect(beforeArchive).toBeUndefined();
 
     await persistSessionTranscriptTurn(
       { agentId: "main", sessionId, sessionKey, storePath },
@@ -406,9 +427,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     expect(after.find((entry) => entry.transcriptSource === "sqlite")?.contentRevision).not.toBe(
       beforeLive?.contentRevision,
     );
-    expect(after.find((entry) => entry.sessionFile === archivePath)?.contentRevision).not.toBe(
-      beforeArchive?.contentRevision,
-    );
+    expect(after.find((entry) => entry.sessionFile === archivePath)).toBeUndefined();
   });
 
   it("classifies active entries through cron parentage chains", async () => {
@@ -464,7 +483,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     expect(entries.filter((entry) => entry.generatedByCronRun)).toHaveLength(4);
   });
 
-  it("keeps archive classification when the active transcript is missing", async () => {
+  it("excludes unregistered archives even when a matching active transcript is missing", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     fsSync.mkdirSync(sessionsDir, { recursive: true });
     const archivePath = path.join(sessionsDir, "cron-run.jsonl.reset.2026-02-16T22-26-33.000Z");
@@ -477,20 +496,8 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
       },
     });
 
-    const expectedArchivePath = archivePath;
-    await expect(listSessionTranscriptCorpusEntriesForAgent("main")).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          agentId: "main",
-          artifactKind: "archive-artifact",
-          contentRevision: expect.any(String),
-          generatedByCronRun: true,
-          sessionKind: "cron",
-          sessionFile: expectedArchivePath,
-          sessionId: "cron-run",
-        }),
-      ]),
-    );
+    const entries = await listSessionTranscriptCorpusEntriesForAgent("main");
+    expect(entries.filter((entry) => entry.artifactKind === "archive-artifact")).toEqual([]);
   });
 
   it("omits active session entries whose transcript files are missing", async () => {
@@ -645,7 +652,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     );
   });
 
-  it("keeps unowned archives from an agent-owned fixed session store", async () => {
+  it("excludes unowned archives even from an agent-owned fixed session store", async () => {
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     const archivePath = path.join(sessionsDir, "retained.jsonl.deleted.2026-02-16T22-27-33.000Z");
     const configPath = path.join(tmpDir, "openclaw.json");
@@ -660,19 +667,10 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
     clearRuntimeConfigSnapshot();
     clearConfigCache();
 
-    await expect(listSessionTranscriptCorpusEntriesForAgent("main")).resolves.toEqual([
-      {
-        agentId: "main",
-        artifactKind: "archive-artifact",
-        contentRevision: expect.any(String),
-        sessionFile: archivePath,
-        sessionId: "retained",
-        sessionKind: "unknown",
-      },
-    ]);
+    await expect(listSessionTranscriptCorpusEntriesForAgent("main")).resolves.toEqual([]);
   });
 
-  it("resolves absolute transcript paths from a fixed custom store", async () => {
+  it("does not classify an unregistered absolute archive through a fixed custom store", async () => {
     const storeDir = path.join(tmpDir, "custom-sessions");
     const sessionsDir = path.join(tmpDir, "agents", "main", "sessions");
     const sessionFile = path.join(sessionsDir, "absolute-thread.jsonl");
@@ -702,7 +700,7 @@ describe("listSessionTranscriptCorpusEntriesForAgent", () => {
       (await listSessionTranscriptCorpusEntriesForAgent("main"))
         .filter((entry) => entry.artifactKind === "archive-artifact")
         .map((entry) => entry.sessionFile),
-    ).toEqual([archivePath]);
+    ).toEqual([]);
   });
 
   it("keeps legacy session keys in non-main per-agent stores", async () => {

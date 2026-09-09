@@ -8,6 +8,7 @@ type SessionProvenanceRow = {
   hook_external_content_source: "gmail" | "webhook" | null;
   plugin_owner_id: string | null;
   session_entry_provenance: number;
+  memory_restricted: number | null;
 };
 
 export function bindSessionEntryProvenance(entry: SessionEntry): SessionProvenanceRow {
@@ -17,6 +18,7 @@ export function bindSessionEntryProvenance(entry: SessionEntry): SessionProvenan
   const persistedHookSource = hookSource === "email" ? "webhook" : hookSource;
   return {
     session_entry_provenance: 1,
+    memory_restricted: entry.visibility === "restricted" || entry.privateRoomExecutionPolicy ? 1 : 0,
     acp_owned: entry.acp ? 1 : 0,
     plugin_owner_id:
       typeof entry.pluginOwnerId === "string" && entry.pluginOwnerId.trim()
@@ -42,12 +44,23 @@ export function resolveSessionEntryProvenanceRow<T extends SessionProvenanceRow>
       .selectFrom("session_windows")
       .select([
         "session_entry_provenance",
+        "memory_restricted",
         "acp_owned",
         "plugin_owner_id",
         "hook_external_content_source",
       ])
       .where("session_id", "=", params.entry.sessionId),
   );
+  // Restriction is monotonic for a physical transcript; a later metadata patch cannot declassify it.
+  const boundSessionRow = {
+    ...params.boundSessionRow,
+    memory_restricted:
+      existingRoot?.memory_restricted === 1 || params.boundSessionRow.memory_restricted === 1
+        ? 1
+        : existingRoot
+          ? existingRoot.memory_restricted
+          : params.boundSessionRow.memory_restricted,
+  };
   const hasTranscript = Boolean(
     executeSqliteQueryTakeFirstSync(
       params.database.db,
@@ -64,7 +77,7 @@ export function resolveSessionEntryProvenanceRow<T extends SessionProvenanceRow>
     (params.previousEntry?.sessionId === params.entry.sessionId || hasTranscript)
   ) {
     return {
-      ...params.boundSessionRow,
+      ...boundSessionRow,
       session_entry_provenance: 0,
       acp_owned: 0,
       plugin_owner_id: null,
@@ -73,12 +86,12 @@ export function resolveSessionEntryProvenanceRow<T extends SessionProvenanceRow>
   }
   return existingRoot?.session_entry_provenance === 1
     ? {
-        ...params.boundSessionRow,
+        ...boundSessionRow,
         acp_owned: existingRoot.acp_owned === 1 ? 1 : params.boundSessionRow.acp_owned,
         plugin_owner_id: params.boundSessionRow.plugin_owner_id ?? existingRoot.plugin_owner_id,
         hook_external_content_source:
           params.boundSessionRow.hook_external_content_source ??
           existingRoot.hook_external_content_source,
       }
-    : params.boundSessionRow;
+    : boundSessionRow;
 }

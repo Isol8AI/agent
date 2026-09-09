@@ -360,6 +360,7 @@ export interface SessionTranscriptArchives {
   generation: string;
   last_publish_attempt_at: number | null;
   last_publish_error: string | null;
+  memory_restricted: number | null;
   publish_attempts: Generated<number>;
   published_at: number | null;
   reason: string;
@@ -425,6 +426,7 @@ export interface SessionWindows {
   display_name: string | null;
   ended_at: number | null;
   hook_external_content_source: string | null;
+  memory_restricted: number | null;
   model: string | null;
   model_provider: string | null;
   parent_session_key: string | null;
