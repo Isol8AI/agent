@@ -32,7 +32,7 @@ describe("skill command discovery through workspace loading", () => {
       } satisfies OpenClawConfig;
       const skillRoot =
         source === "workshop"
-          ? resolveWorkshopSkillsDir(config, "alpha")
+          ? resolveWorkshopSkillsDir(config, "alpha", { OPENCLAW_STATE_DIR: root })
           : path.join(workspaceDir, "skills");
       await writeSkill({
         dir: path.join(workspaceDir, "skills", "allowed"),
@@ -47,7 +47,10 @@ describe("skill command discovery through workspace loading", () => {
         });
       }
       await writeSkill({
-        dir: path.join(resolveWorkshopSkillsDir(config, "beta"), "beta-only"),
+        dir: path.join(
+          resolveWorkshopSkillsDir(config, "beta", { OPENCLAW_STATE_DIR: root }),
+          "beta-only",
+        ),
         name: "beta-only",
         description: "Beta's private procedure",
       });

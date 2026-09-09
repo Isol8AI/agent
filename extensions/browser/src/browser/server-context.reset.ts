@@ -2,6 +2,7 @@
  * Browser profile reset operations for local managed profiles.
  */
 import fs from "node:fs";
+import { getRuntimeConfig } from "../config/config.js";
 import type { ResolvedBrowserProfile } from "./config.js";
 import { BrowserResetUnsupportedError } from "./errors.js";
 import { getBrowserProfileCapabilities } from "./profile-capabilities.js";
@@ -10,7 +11,7 @@ import {
   beginProfileTransition,
 } from "./server-context.lifecycle.js";
 import type { BrowserServerState, ProfileRuntimeState } from "./server-context.types.js";
-import { movePathToTrash } from "./trash.js";
+import { movePathToTrash, retireProfileSessionState } from "./trash.js";
 
 type ResetDeps = {
   profile: ResolvedBrowserProfile;
@@ -52,6 +53,7 @@ export function createProfileResetOps({
       runtime,
       reason: "profile reset requested",
       afterCleanup: async () => {
+        await retireProfileSessionState(profile.name, getRuntimeConfig().browser?.sessionState);
         if (!fs.existsSync(userDataDir)) {
           return;
         }

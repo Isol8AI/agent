@@ -143,11 +143,10 @@ export function retainAgentDatabase(db: DatabaseSync): () => void {
 
 export function closeCachedOpenClawAgentDatabase(
   database: OpenClawAgentDatabase,
-  options: { eviction?: boolean } = {},
+  options?: Parameters<OpenClawAgentDatabase["walMaintenance"]["close"]>[0],
 ): void {
-  // Eviction must stay cheap: PASSIVE skips waiting on concurrent readers,
-  // whose drained TRUNCATE checkpoints blocked the event loop for seconds.
-  database.walMaintenance.close(options.eviction ? { checkpointMode: "PASSIVE" } : undefined);
+  // Ordinary close remains replication-aware; integrity confirmation explicitly detaches WAL.
+  database.walMaintenance.close({ checkpointMode: "PASSIVE", ...options });
   if (database.db.isOpen) {
     database.db.close();
   }
@@ -178,7 +177,7 @@ export function evictLruAgentDatabaseHandles(): void {
       }
       // Registry rows are durable discovery metadata; only explicit disposal
       // unregisters them, while eviction closes this process-local handle.
-      closeCachedOpenClawAgentDatabase(database, { eviction: true });
+      closeCachedOpenClawAgentDatabase(database);
       cache.databases.delete(pathname);
       cache.failures.delete(pathname);
       if (cache.incognito.has(database)) {
@@ -208,6 +207,7 @@ export function evictLruAgentDatabaseHandles(): void {
 export function closeOpenClawAgentDatabaseByPath(
   pathname: string,
   expectedAgentId?: string,
+  options?: Parameters<OpenClawAgentDatabase["walMaintenance"]["close"]>[0],
 ): boolean {
   // Cache keys are lexical resolved paths. Do not realpath aliases here: a
   // symlink swap must never redirect cleanup onto a different cached database.
@@ -227,7 +227,7 @@ export function closeOpenClawAgentDatabaseByPath(
     return false;
   }
   const incognito = cache.incognito.has(database);
-  closeCachedOpenClawAgentDatabase(database);
+  closeCachedOpenClawAgentDatabase(database, options);
   cache.databases.delete(resolvedPath);
   cache.failures.delete(resolvedPath);
   if (incognito) {
@@ -258,7 +258,7 @@ export function settleOpenClawAgentDatabaseWorkerClose(
   const database = cache.databases.get(resolvedPath);
   if (database) {
     try {
-      database.walMaintenance.close();
+      database.walMaintenance.close({ checkpointMode: "PASSIVE" });
     } catch (error) {
       errors.push(error instanceof Error ? error : new Error(String(error)));
     }

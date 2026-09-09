@@ -744,9 +744,8 @@ describe("prepared Docker publication", () => {
     expect(prepare.jobs.seal.needs).toContain("build");
   });
 
-  it("keeps preparation unable to publish and serializes the single approved writer", () => {
+  it("keeps reusable preparation unable to publish", () => {
     const prepare = parse(readFileSync(".github/workflows/docker-release-prepare.yml", "utf8"));
-    const publish = parse(readFileSync(".github/workflows/docker-release.yml", "utf8"));
     expect(prepare.on.workflow_call.secrets).toBeUndefined();
     expect(prepare.permissions).toEqual({ contents: "read" });
     for (const job of Object.values(prepare.jobs) as {
@@ -767,22 +766,5 @@ describe("prepared Docker publication", () => {
         }
       }
     }
-    expect(publish.jobs.prepare.uses).toBe("./.github/workflows/docker-release-prepare.yml");
-    expect(publish.jobs.prepare.secrets).toBeUndefined();
-    expect(publish.concurrency).toBeUndefined();
-    expect(publish.jobs.publish.environment).toBe("docker-release");
-    expect(publish.jobs.publish.concurrency).toEqual({
-      group: "docker-release-publish",
-      "cancel-in-progress": false,
-      queue: "max",
-    });
-    expect(
-      Object.entries(publish.jobs)
-        .filter(
-          ([, job]) =>
-            (job as { permissions?: { packages?: string } }).permissions?.packages === "write",
-        )
-        .map(([name]) => name),
-    ).toEqual(["publish"]);
   });
 });

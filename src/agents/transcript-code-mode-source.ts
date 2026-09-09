@@ -1,13 +1,18 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { prepareShellSourceRedactor } from "../logging/redact-shell-source.js";
 import { resolveCodeModeExecToolInputKind } from "./code-mode-control-tools.js";
 import type { AgentMessage, StreamFn } from "./runtime/index.js";
 
+export type SourceField = {
+  value: string;
+  redact?: Awaited<ReturnType<typeof prepareShellSourceRedactor>>;
+};
 type SourceSlot = {
   block: object;
   id: string;
   name: string;
-  language: NonNullable<ReturnType<typeof resolveCodeModeExecToolInputKind>>;
-  fields: ReadonlyMap<string, string>;
+  language: NonNullable<ReturnType<typeof resolveCodeModeExecToolInputKind>> | "shell";
+  fields: ReadonlyMap<string, SourceField>;
 };
 // Opaque handles never carry model- or plugin-supplied metadata.
 export type CodeModeSourceAppend = object;
@@ -30,8 +35,10 @@ function outerCalls(message: unknown): Record<string, unknown>[] {
 export function wrapStreamFnCodeModeSource(
   base: StreamFn,
   toolNames: ReadonlySet<string>,
+  shellToolNames: ReadonlySet<string> = new Set(),
 ): StreamFn {
   const names = new Set(toolNames);
+  const shellNames = new Set(shellToolNames);
   return async (model, context, options) => {
     const stream = await base(model, context, options);
     const result = stream.result.bind(stream);
@@ -42,22 +49,28 @@ export function wrapStreamFnCodeModeSource(
         return message;
       }
       captured = true;
+      const shellRedactor = shellNames.size ? await prepareShellSourceRedactor() : undefined;
       const slots = outerCalls(message).flatMap((block): SourceSlot[] => {
-        const language = resolveCodeModeExecToolInputKind(block.arguments);
+        const shell =
+          typeof block.name === "string" &&
+          shellNames.has(block.name) &&
+          isRecord(block.arguments) &&
+          block.arguments.language === undefined;
+        const language = shell ? "shell" : resolveCodeModeExecToolInputKind(block.arguments);
         if (
           typeof block.id !== "string" ||
           typeof block.name !== "string" ||
-          !names.has(block.name) ||
+          (!names.has(block.name) && !shell) ||
           !language ||
           !isRecord(block.arguments)
         ) {
           return [];
         }
-        const fields = new Map<string, string>();
-        for (const key of ["code", "command"]) {
+        const fields = new Map<string, SourceField>();
+        for (const key of shell ? ["command"] : ["code", "command"]) {
           const value = block.arguments[key];
           if (typeof value === "string") {
-            fields.set(key, value);
+            fields.set(key, { value, ...(shell ? { redact: shellRedactor } : {}) });
           }
         }
         return fields.size ? [{ block, id: block.id, name: block.name, language, fields }] : [];
@@ -148,25 +161,30 @@ export function withCodeModeSourceAppend(
 export function readCodeModeSourceFields(
   message: AgentMessage,
   token?: CodeModeSourceAppend,
-): ReadonlyMap<object, ReadonlyMap<string, string>> {
+): ReadonlyMap<object, ReadonlyMap<string, SourceField>> {
   const state = token && sourceAppends.get(token);
   const slots = state?.active && state.message === message ? state.slots : [];
   const calls = slots.length ? outerCalls(message) : [];
-  const fields = new Map<object, ReadonlyMap<string, string>>();
+  const fields = new Map<object, ReadonlyMap<string, SourceField>>();
   for (const slot of slots) {
     const block = calls.find((call) => call === slot.block);
     if (
       !block ||
       block.id !== slot.id ||
       block.name !== slot.name ||
-      resolveCodeModeExecToolInputKind(block.arguments) !== slot.language ||
+      (slot.language === "shell"
+        ? !isRecord(block.arguments) || block.arguments.language !== undefined
+        : resolveCodeModeExecToolInputKind(block.arguments) !== slot.language) ||
       !isRecord(block.arguments) ||
       calls.filter((call) => call.id === slot.id).length !== 1
     ) {
       continue;
     }
     const args = block.arguments;
-    fields.set(block, new Map([...slot.fields].filter(([key, value]) => args[key] === value)));
+    fields.set(
+      block,
+      new Map([...slot.fields].filter(([key, field]) => args[key] === field.value)),
+    );
   }
   return fields;
 }
@@ -176,7 +194,7 @@ export function copyCodeModeSourceAppend(
   original: AgentMessage,
   copy: AgentMessage,
   token?: CodeModeSourceAppend,
-  transformSource?: (source: string) => string,
+  transformSource?: (source: string, field: SourceField) => string,
 ): void {
   const state = token && sourceAppends.get(token);
   if (original === copy || !state?.active || state.message !== original) {
@@ -188,7 +206,7 @@ export function copyCodeModeSourceAppend(
   const slots: SourceSlot[] = [];
   for (const [index, block] of originals.entries()) {
     const fields = fieldsByBlock.get(block);
-    const language = resolveCodeModeExecToolInputKind(block.arguments);
+    const language = state.slots.find((slot) => slot.block === block)?.language;
     const next = transformSource ? copies[index] : copies.find((call) => call === block);
     if (
       !fields?.size ||
@@ -196,18 +214,20 @@ export function copyCodeModeSourceAppend(
       !next ||
       next.id !== block.id ||
       next.name !== block.name ||
-      resolveCodeModeExecToolInputKind(next.arguments) !== language ||
+      (language === "shell"
+        ? !isRecord(next.arguments) || next.arguments.language !== undefined
+        : resolveCodeModeExecToolInputKind(next.arguments) !== language) ||
       typeof next.id !== "string" ||
       typeof next.name !== "string" ||
       !isRecord(next.arguments)
     ) {
       continue;
     }
-    const transferred = new Map<string, string>();
-    for (const [key, value] of fields) {
-      const expected = transformSource ? transformSource(value) : value;
+    const transferred = new Map<string, SourceField>();
+    for (const [key, field] of fields) {
+      const expected = transformSource ? transformSource(field.value, field) : field.value;
       if (next.arguments[key] === expected) {
-        transferred.set(key, expected);
+        transferred.set(key, { ...field, value: expected });
       }
     }
     slots.push({ block: next, id: next.id, name: next.name, language, fields: transferred });

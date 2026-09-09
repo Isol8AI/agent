@@ -31,10 +31,19 @@ function getBashParserForCommandExplanation(): Promise<TreeSitter.Parser> {
  * Prefer explainShellCommand for normal command-explainer use.
  */
 export async function parseBashForCommandExplanation(source: string): Promise<TreeSitter.Tree> {
+  return (await prepareBashParserForSource())(source);
+}
+
+/** Prepare bounded synchronous parsing at an asynchronous tool-owner boundary. */
+export async function prepareBashParserForSource(): Promise<(source: string) => TreeSitter.Tree> {
+  const parser = await getBashParserForCommandExplanation();
+  return (source) => parsePreparedBash(parser, source);
+}
+
+function parsePreparedBash(parser: TreeSitter.Parser, source: string): TreeSitter.Tree {
   if (source.length > MAX_COMMAND_EXPLANATION_SOURCE_CHARS) {
     throw new Error("Shell command is too large to explain");
   }
-  const parser = await getBashParserForCommandExplanation();
   const deadlineMs = performance.now() + MAX_COMMAND_EXPLANATION_PARSE_MS;
   let timedOut = false;
   const tree = parser.parse(source, null, {

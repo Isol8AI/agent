@@ -12,6 +12,7 @@ import { resolveSqliteTargetFromSessionStorePath } from "../../config/sessions/s
 import { resetDiagnosticEventsForTest } from "../../infra/diagnostic-events.js";
 import { createDiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
 import { resetDiagnosticRunActivityForTest } from "../../logging/diagnostic-run-activity.js";
+import { SOURCE_HEADER_PATTERN_SOURCES } from "../../logging/redact-patterns.js";
 import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
 import { resetSecretRedactionRegistryForTest } from "../../logging/secret-redaction-registry.test-support.js";
 import {
@@ -22,7 +23,12 @@ import { createMockPluginRegistry } from "../../plugins/hooks.test-helpers.js";
 import { createNestedToolActivity } from "../../sessions/nested-tool-activity.js";
 import { closeOpenClawAgentDatabaseByPath } from "../../state/openclaw-agent-db.js";
 import { toToolDefinitions } from "../agent-tool-definition-adapter.js";
-import { isCodeModeExecTool } from "../code-mode-control-tools.js";
+import { createExecTool } from "../bash-tools.exec-run.js";
+import {
+  copyCodeModeControlToolIdentity,
+  isCodeModeExecTool,
+  isNativeShellTool,
+} from "../code-mode-control-tools.js";
 import { createCodeModeHarness, resetCodeModeTestState } from "../code-mode.test-support.js";
 import { wrapStreamFnWithDiagnosticModelCallEvents } from "../embedded-agent-runner/run/attempt.model-diagnostic-events.js";
 import type { AgentMessage } from "../runtime/index.js";
@@ -50,6 +56,275 @@ afterEach(() => {
 });
 
 describe("AgentSession runtime and transcript projections", () => {
+  it.each(["owned", "unowned", "registered", "custom-native", "unsafe"] as const)(
+    "enforces shell source policy through both storage passes and SQLite replay (%s)",
+    async (mode) => {
+      const owned = mode !== "unowned";
+      const dir = tempDirs.make("openclaw-shell-source-projection-");
+      const scope = {
+        agentId: "main",
+        sessionId: "shell-projection",
+        sessionKey: "agent:main:shell-projection",
+        storePath: path.join(dir, "sessions.json"),
+      };
+      await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
+      const manager = SessionManager.open(scope, dir);
+      const config =
+        mode === "custom-native"
+          ? { logging: { redactPatterns: [[...SOURCE_HEADER_PATTERN_SOURCES][0]!] } }
+          : {};
+      guardSessionManager(manager, { config, allowedToolNames: ["exec"] });
+      if (mode === "registered") {
+        registerSecretValueForRedaction("${TOKEN:-}");
+      }
+      const command =
+        mode === "unsafe"
+          ? 'curl -H "Authorization: Bearer ${TOKEN:-fixtureLiteral}" -H "X-Api-Key: $(echo fixtureSubstitution)"; curl -H \'Authorization: Bearer $LITERAL\''
+          : 'curl -H "Authorization: Bearer ${TOKEN:-}" -H "X-Api-Key: $(printenv KEY)"';
+      let executed: unknown;
+      const tool: ToolDefinition = {
+        name: "exec",
+        label: "exec",
+        description: "Synthetic shell owner fixture",
+        parameters: Type.Object({ command: Type.String() }),
+        execute: async (_id, args) => {
+          executed = args;
+          return {
+            content: [{ type: "text", text: "fixture only; no shell was executed" }],
+            details: {},
+          };
+        },
+      };
+      if (owned) {
+        copyCodeModeControlToolIdentity(createExecTool(), tool);
+      }
+      streamMocks.streamSimple
+        .mockImplementationOnce((model: Model) =>
+          createAssistantResultStream(
+            createAssistant(
+              model,
+              [{ type: "toolCall", id: "shell_call", name: "exec", arguments: { command } }],
+              "toolUse",
+            ),
+          ),
+        )
+        .mockImplementation((model: Model) =>
+          createAssistantResultStream(createAssistant(model, [{ type: "text", text: "Done." }])),
+        );
+      const { session } = await createTestSession({ sessionManager: manager, customTools: [tool] });
+      session.agent.streamFn = wrapStreamFnCodeModeSource(
+        session.agent.streamFn!,
+        new Set(),
+        new Set(isNativeShellTool(tool) ? [tool.name] : []),
+      );
+      await session.prompt("Use the synthetic test tool.");
+      expect(executed).toEqual({ command });
+      const assertPersisted = (serialized: string) => {
+        if (mode === "owned") {
+          expect(serialized).toContain("${TOKEN:-}");
+        } else {
+          expect(serialized).not.toContain("${TOKEN:-}");
+        }
+        if (["owned", "registered", "custom-native"].includes(mode)) {
+          expect(serialized).toContain("$(printenv KEY)");
+        } else {
+          expect(serialized).not.toContain("$(printenv KEY)");
+        }
+        for (const value of ["fixtureLiteral", "fixtureSubstitution", "$LITERAL", "sourceSlots"]) {
+          expect(serialized).not.toContain(value);
+        }
+      };
+      assertPersisted(JSON.stringify(manager.buildSessionContext().messages));
+      session.dispose();
+      expect(
+        closeOpenClawAgentDatabaseByPath(
+          resolveSqliteTargetFromSessionStorePath(scope.storePath).path!,
+        ),
+      ).toBe(true);
+      const reopened = SessionManager.open(scope, dir);
+      const { session: next } = await createTestSession({
+        sessionManager: reopened,
+        customTools: [tool],
+      });
+      await next.prompt("Recall the prior command.");
+      const context = streamMocks.streamSimple.mock.calls.at(-1)![1];
+      const serialized = JSON.stringify(context.messages);
+      assertPersisted(serialized);
+      next.dispose();
+    },
+  );
+
+  it.each(["message_end", "before_message_write"] as const)(
+    "revalidates shell custody after %s mutations and token reuse through SQLite replay",
+    async (hook) => {
+      const dir = tempDirs.make("shell-hook-replay-");
+      const scope = {
+        agentId: "main",
+        sessionId: "shell-hooks",
+        sessionKey: "agent:main:shell-hooks",
+        storePath: path.join(dir, "sessions.json"),
+      };
+      const command = 'curl -H "Authorization: Bearer ${TOKEN:-}"';
+      const actions = [
+        "unchanged",
+        "replacement",
+        "command",
+        "id",
+        "language",
+        "duplicate",
+      ] as const;
+      let action: (typeof actions)[number] = "unchanged";
+      let original: AssistantMessage | undefined;
+      const mutate = (message: AgentMessage): AgentMessage => {
+        if (message.role !== "assistant" || message.stopReason !== "toolUse") {
+          return message;
+        }
+        const call = message.content.find((block) => block.type === "toolCall");
+        if (!call || call.type !== "toolCall" || !call.id.startsWith("shell_hook_")) {
+          return message;
+        }
+        if (action === "replacement") {
+          return { ...message, content: [{ ...call }] };
+        }
+        if (action === "command") {
+          call.arguments.command = command + " --silent";
+        }
+        if (action === "id") {
+          call.id += "_changed";
+        }
+        if (action === "language") {
+          call.arguments.language = "shell";
+        }
+        if (action === "duplicate") {
+          return { ...message, content: [call, { ...call }] };
+        }
+        return message;
+      };
+      const resourceLoader =
+        hook === "message_end"
+          ? createResourceLoader(
+              new Map([
+                [
+                  "message_end",
+                  [
+                    async (event: unknown) => ({
+                      message: mutate((event as MessageEndEvent).message),
+                    }),
+                  ],
+                ],
+              ]),
+            )
+          : createResourceLoader();
+      if (hook === "before_message_write") {
+        initializeGlobalHookRunner(
+          createMockPluginRegistry([
+            {
+              hookName: hook,
+              handler: (event: unknown) => ({
+                message: mutate((event as { message: AgentMessage }).message),
+              }),
+            },
+          ]),
+        );
+      }
+      const tool: ToolDefinition = {
+        name: "exec",
+        label: "exec",
+        description: "Synthetic shell fixture",
+        parameters: Type.Object({ command: Type.String() }),
+        execute: async () => ({ content: [{ type: "text", text: "fixture only" }], details: {} }),
+      };
+      copyCodeModeControlToolIdentity(createExecTool(), tool);
+      await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
+      const manager = SessionManager.open(scope, dir);
+      guardSessionManager(manager, { allowedToolNames: ["exec"] });
+      const { session } = await createTestSession({
+        sessionManager: manager,
+        customTools: [tool],
+        resourceLoader,
+      });
+      session.agent.streamFn = wrapStreamFnCodeModeSource(
+        session.agent.streamFn!,
+        new Set(),
+        new Set(["exec"]),
+      );
+      for (action of actions) {
+        streamMocks.streamSimple
+          .mockImplementationOnce((model: Model) => {
+            original = createAssistant(
+              model,
+              [
+                {
+                  type: "toolCall",
+                  id: `shell_hook_${action}`,
+                  name: "exec",
+                  arguments: { command },
+                },
+              ],
+              "toolUse",
+            );
+            return createAssistantResultStream(original);
+          })
+          .mockImplementation((model: Model) =>
+            createAssistantResultStream(createAssistant(model, [{ type: "text", text: "Done." }])),
+          );
+        await session.prompt(`Test ${action}.`);
+        const calls = manager
+          .buildSessionContext()
+          .messages.flatMap((message) =>
+            message.role === "assistant"
+              ? message.content.filter(
+                  (block) =>
+                    block.type === "toolCall" && block.id.startsWith(`shell_hook_${action}`),
+                )
+              : [],
+          );
+        expect(calls.length).toBeGreaterThan(0);
+        for (const call of calls) {
+          if (call.type !== "toolCall") {
+            throw new Error("expected tool call");
+          }
+          expect(String(call.arguments.command).includes("${TOKEN:-}")).toBe(
+            action === "unchanged",
+          );
+        }
+      }
+      // A completed response's private append token cannot authorize another write.
+      manager.appendMessage(original!);
+      guardSessionManager(manager).clearPendingToolResults?.();
+      expect(JSON.stringify(manager.getLeafEntry())).not.toContain("${TOKEN:-}");
+      session.dispose();
+      expect(
+        closeOpenClawAgentDatabaseByPath(
+          resolveSqliteTargetFromSessionStorePath(scope.storePath).path!,
+        ),
+      ).toBe(true);
+      const reopened = SessionManager.open(scope, dir);
+      const { session: next } = await createTestSession({
+        sessionManager: reopened,
+        customTools: [tool],
+      });
+      await next.prompt("Recall the previous commands.");
+      const context = streamMocks.streamSimple.mock.calls.at(-1)![1];
+      for (const message of context.messages) {
+        if (message.role !== "assistant") {
+          continue;
+        }
+        for (const block of message.content) {
+          if (
+            block.type === "toolCall" &&
+            block.id.startsWith("shell_hook_") &&
+            !block.id.startsWith("shell_hook_unchanged")
+          ) {
+            expect(JSON.stringify(block.arguments)).not.toContain("${TOKEN:-}");
+          }
+        }
+      }
+      expect(JSON.stringify(context.messages)).not.toContain("sourceSlots");
+      next.dispose();
+    },
+  );
+
   const source =
     "function computeToken() { return 42; }\nconst API_TOKEN = computeToken(); return API_TOKEN;";
   const genericLiteral = "fixture-only-not-a-real-secret";

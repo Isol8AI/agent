@@ -1,12 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../../test/helpers/promise.js";
 import {
   createPluginMetadataSnapshot,
   makeRegistry,
 } from "../../../config/plugin-auto-enable.test-helpers.js";
+import { createDiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import { setPluginToolMeta } from "../../../plugins/tool-metadata.js";
+import { materializeBundleMcpToolsForRun } from "../../agent-bundle-mcp-materialize.js";
+import type { McpToolCatalog, SessionMcpRuntime } from "../../agent-bundle-mcp-types.js";
+import { resolveConversationCapabilityProfile } from "../../conversation-capability-profile.js";
 import { createAgentCleanupScope } from "../../run-cleanup-timeout.js";
 import { createStubTool } from "../../test-helpers/agent-tool-stubs.js";
 import { attachToolAllowlistIntersection } from "../../tool-policy.js";
+import {
+  createToolSearchCatalogRef,
+  createToolSearchTools,
+  resolveToolSearchConfig,
+  clearToolSearchCatalog,
+} from "../../tool-search.js";
 
 const mocks = vi.hoisted(() => ({
   createBundleLspToolRuntime: vi.fn(),
@@ -25,7 +36,8 @@ vi.mock("../../agent-bundle-mcp-tools.js", () => ({
   materializeBundleMcpToolsForRun: mocks.materializeBundleMcpToolsForRun,
 }));
 
-vi.mock("../../runtime-plan/tools.js", () => ({
+vi.mock("../../runtime-plan/tools.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../runtime-plan/tools.js")>()),
   normalizeAgentRuntimeTools: vi.fn(({ tools }: { tools: unknown[] }) => [...tools]),
 }));
 
@@ -42,7 +54,9 @@ vi.mock("../effective-tool-policy.js", () => ({
 }));
 
 import { prepareEmbeddedAttemptBundleTools } from "./attempt-bundle-tools.js";
+import { createPromptBuildToolPolicy } from "./attempt-prompt-support.js";
 import { createAttemptSetupFixture } from "./attempt-setup.test-support.js";
+import { prepareEmbeddedAttemptToolCatalog } from "./attempt-tool-catalog.js";
 
 describe("prepareEmbeddedAttemptBundleTools", () => {
   beforeEach(() => {
@@ -83,6 +97,240 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
       },
     } as unknown as Parameters<typeof prepareEmbeddedAttemptBundleTools>[0];
   }
+
+  it.each([false, true])(
+    "blocks cold non-directory preparation (Code Mode=%s)",
+    async (codeMode) => {
+      const input = createInput([], []);
+      input.attempt.config = {
+        plugins: { enabled: false },
+        mcp: { servers: { probe: { command: "fixture" } } },
+      };
+      input.attempt.runtimePlan = undefined;
+      Object.assign(input.preparedToolBase, {
+        codeModeControlsEnabledForRun: codeMode,
+        toolSearchControlsEnabledForRun: false,
+      });
+      const deferred = createDeferred<McpToolCatalog>();
+      const entered = createDeferred();
+      const callTool = vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "allowed-cold" }],
+      }));
+      const runtime: SessionMcpRuntime = {
+        sessionId: "session",
+        workspaceDir: "/tmp/workspace",
+        configFingerprint: "cold",
+        createdAt: 0,
+        lastUsedAt: 0,
+        markUsed() {},
+        peekCatalog: () => null,
+        getCatalog: () => {
+          entered.resolve();
+          return deferred.promise;
+        },
+        callTool,
+        dispose: async () => {},
+        joinCleanup: async () => {},
+        acquireLease: () => () => {},
+      };
+      mocks.acquireSessionMcpRuntime.mockResolvedValue({ runtime });
+      mocks.materializeBundleMcpToolsForRun.mockImplementation(materializeBundleMcpToolsForRun);
+      let prepared = false;
+      const pending = prepareEmbeddedAttemptBundleTools(input).then((result) => {
+        prepared = true;
+        return result;
+      });
+      await entered.promise;
+      expect(prepared).toBe(false);
+      expect(mocks.materializeBundleMcpToolsForRun).toHaveBeenCalledWith(
+        expect.objectContaining({ nonBlocking: false }),
+      );
+      deferred.resolve({
+        version: 1,
+        generatedAt: 1,
+        servers: { probe: { serverName: "probe", launchSummary: "probe", toolCount: 2 } },
+        tools: ["allowed", "denied"].map((toolName) => ({
+          serverName: "probe",
+          safeServerName: "probe",
+          toolName,
+          description: toolName,
+          fallbackDescription: toolName,
+          inputSchema: { type: "object", properties: {} },
+        })),
+      });
+      const bundle = await pending;
+      try {
+        let activeToolNames = bundle.uncompactedEffectiveTools.map((tool) => tool.name);
+        const policy = createPromptBuildToolPolicy({
+          session: {
+            getActiveToolNames: () => activeToolNames,
+            setActiveToolsByName: (names) => {
+              activeToolNames = names;
+            },
+          },
+          effectiveTools: bundle.uncompactedEffectiveTools,
+          uncompactedEffectiveTools: bundle.uncompactedEffectiveTools,
+          tools: bundle.tools,
+          codeModeControlsEnabled: false,
+        });
+        const surface = policy.apply(["probe__allowed"]);
+        expect(surface.effectiveTools.map((tool) => tool.name)).toEqual(["probe__allowed"]);
+        expect(activeToolNames).toEqual(["probe__allowed"]);
+        const allowed = surface.effectiveTools.find((tool) => tool.name === "probe__allowed");
+        if (!allowed) {
+          throw new Error("Expected allowed cold MCP tool");
+        }
+        expect(JSON.stringify(await allowed.execute("allowed", {}))).toContain("allowed-cold");
+        expect(callTool).toHaveBeenCalledExactlyOnceWith("probe", "allowed", {});
+      } finally {
+        await bundle.bundleMcpRuntime?.dispose();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "retains prompt policy in the original cold directory (allow MCP=%s)",
+    async (allowMcp) => {
+      const config = {
+        plugins: { enabled: false },
+        mcp: { servers: { probe: { command: "fixture" } } },
+        tools: { toolSearch: { enabled: true, mode: "directory" as const } },
+      };
+      const catalogRef = createToolSearchCatalogRef();
+      const controls = createToolSearchTools({ config, catalogRef });
+      const existing = {
+        ...createStubTool("existing"),
+        execute: vi.fn(async () => ({
+          content: [{ type: "text" as const, text: "allowed-existing" }],
+        })),
+      };
+      const input = createInput([], [...controls, existing]);
+      input.attempt.config = config;
+      input.attempt.runtimePlan = undefined;
+      Object.assign(input.preparedToolBase, {
+        codeModeControlsEnabledForRun: false,
+        toolSearchControlsEnabledForRun: true,
+        toolSearchConfig: resolveToolSearchConfig(config),
+        toolSearchRuntimeConfig: config,
+        toolSearchCatalogRef: catalogRef,
+        runtimeCapabilityProfile: resolveConversationCapabilityProfile({ config }),
+      });
+      const deferred = createDeferred<McpToolCatalog>();
+      const callTool = vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "same-cold-run" }],
+      }));
+      const runtime: SessionMcpRuntime = {
+        sessionId: "session",
+        workspaceDir: "/tmp/workspace",
+        configFingerprint: "cold",
+        createdAt: 0,
+        lastUsedAt: 0,
+        markUsed() {},
+        peekCatalog: () => null,
+        getCatalog: () => deferred.promise,
+        callTool,
+        dispose: async () => {},
+        joinCleanup: async () => {},
+        acquireLease: () => () => {},
+      };
+      mocks.acquireSessionMcpRuntime.mockResolvedValue({ runtime });
+      mocks.materializeBundleMcpToolsForRun.mockImplementation(materializeBundleMcpToolsForRun);
+      const bundleTools = await prepareEmbeddedAttemptBundleTools(input);
+      expect(bundleTools.bundleMcpRuntime?.tools).toEqual([]);
+      const prepared = prepareEmbeddedAttemptToolCatalog({
+        attempt: input.attempt,
+        setup: input.setup,
+        preparedToolBase: input.preparedToolBase,
+        bundleTools,
+        refreshTools: () => {
+          bundleTools.refreshTools();
+          prepared.refreshTools();
+          refreshSessionTools();
+          promptToolPolicy.refresh();
+        },
+        abortSignal: new AbortController().signal,
+        runTrace: createDiagnosticTraceContext(),
+        executeCodeModeTool: async () => {
+          throw new Error("not Code Mode");
+        },
+      });
+      let activeToolNames = prepared.effectiveTools.map((tool) => tool.name);
+      const refreshSessionTools = vi.fn(() => {
+        activeToolNames = prepared.effectiveTools.map((tool) => tool.name);
+      });
+      const promptToolPolicy = createPromptBuildToolPolicy({
+        session: {
+          getActiveToolNames: () => activeToolNames,
+          setActiveToolsByName: (names) => {
+            activeToolNames = names;
+          },
+        },
+        effectiveTools: prepared.effectiveTools,
+        uncompactedEffectiveTools: bundleTools.uncompactedEffectiveTools,
+        tools: bundleTools.tools,
+        catalogRef,
+        codeModeControlsEnabled: false,
+        onApplied: (surface) => {
+          prepared.applyPromptToolPolicy(
+            new Set([
+              ...surface.activeToolNames,
+              ...surface.uncompactedEffectiveTools.map((tool) => tool.name),
+            ]),
+          );
+        },
+      });
+      promptToolPolicy.apply(["existing", ...(allowMcp ? ["probe__query"] : [])]);
+      try {
+        expect(catalogRef.current?.entries.map((entry) => entry.name)).toEqual(["existing"]);
+        const search = prepared.effectiveTools.find((tool) => tool.name === "tool_search")!;
+        const searching = search.execute("cold-search", { query: "probe" });
+        expect(callTool).not.toHaveBeenCalled();
+        deferred.resolve({
+          version: 1,
+          generatedAt: 1,
+          servers: { probe: { serverName: "probe", launchSummary: "probe", toolCount: 1 } },
+          tools: [
+            {
+              serverName: "probe",
+              safeServerName: "probe",
+              toolName: "query",
+              description: "probe",
+              inputSchema: { type: "object", properties: {} },
+              fallbackDescription: "probe",
+            },
+          ],
+        });
+        const result = await searching;
+        expect(refreshSessionTools).toHaveBeenCalledTimes(1);
+        expect(
+          bundleTools.uncompactedEffectiveTools.some((tool) => tool.name === "probe__query"),
+        ).toBe(true);
+        const call = prepared.effectiveTools.find((tool) => tool.name === "tool_call")!;
+        if (allowMcp) {
+          expect(JSON.stringify(result)).toContain("probe__query");
+          expect(
+            JSON.stringify(await call.execute("cold-call", { id: "probe__query", args: {} })),
+          ).toContain("same-cold-run");
+          expect(callTool).toHaveBeenCalledWith("probe", "query", {});
+        } else {
+          expect(JSON.stringify(result)).not.toContain("probe__query");
+          expect(catalogRef.current?.entries.map((entry) => entry.name)).toEqual(["existing"]);
+          await expect(
+            call.execute("denied-call", { id: "probe__query", args: {} }),
+          ).rejects.toThrow("Unknown tool id");
+          expect(callTool).not.toHaveBeenCalled();
+        }
+        expect(
+          JSON.stringify(await call.execute("allowed-call", { id: "existing", args: {} })),
+        ).toContain("allowed-existing");
+        expect(existing.execute).toHaveBeenCalledTimes(1);
+        expect(mocks.materializeBundleMcpToolsForRun).toHaveBeenCalledTimes(1);
+      } finally {
+        await bundleTools.bundleMcpRuntime?.dispose();
+        clearToolSearchCatalog({ catalogRef });
+      }
+    },
+  );
 
   it.each([
     { allow: ["chrome*"], expected: ["chrome__click"] },

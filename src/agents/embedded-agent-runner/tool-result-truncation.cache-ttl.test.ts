@@ -19,6 +19,27 @@ import {
 
 const NOW = 1_000_000;
 
+it("prunes by size without a cache marker and retains native projection replay", () => {
+  const messages = prunableHistory([tool({ id: "old", text: "x".repeat(20_000) })]);
+  const state = createToolResultPromptProjectionState();
+  const options = {
+    config: { mode: "size" as const },
+    contextWindowTokens: 1_000,
+    lastCacheTouchAt: null,
+    projectionState: state,
+  };
+  const pruned = project(messages, options);
+  expect(pruned).not.toEqual(messages);
+  expect(project(messages, { ...options, pruneNewRounds: false })).toEqual(pruned);
+  expect(
+    project(messages, {
+      ...options,
+      config: { mode: "cache-ttl" },
+      projectionState: createToolResultPromptProjectionState(),
+    }),
+  ).toEqual(messages);
+});
+
 function assistant(content: unknown = [{ type: "text", text: "assistant" }]): AgentMessage {
   return {
     role: "assistant",

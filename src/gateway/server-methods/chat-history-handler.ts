@@ -43,6 +43,7 @@ import {
 import { hiddenSessionNotFound } from "../session-sharing-policy.js";
 import { prepareSessionSharing, resolveSessionVisibility } from "../session-sharing.js";
 import { capArrayByJsonBytes } from "../session-transcript-readers.js";
+import { SessionLookupUnavailableError } from "../session-utils-store-read.js";
 import {
   buildGatewaySessionInfo,
   getSessionDefaults,
@@ -187,6 +188,26 @@ async function handleChatHistoryRequest({
     respond(false, undefined, requestedAgent.error);
     return;
   }
+  let loadedSession: ReturnType<typeof loadGatewaySessionEntryReadOnly>;
+  try {
+    loadedSession = measureDiagnosticsTimelineSpanSync(
+      `gateway.${method}.session_entry`,
+      () =>
+        loadGatewaySessionEntryReadOnly(sessionKey, {
+          agentId: requestedAgent.agentId,
+          clone: false,
+          includeStoreChildEntries: true,
+          projection: "list",
+        }),
+      { config: requestConfig, phase: method },
+    );
+  } catch (error) {
+    if (!(error instanceof SessionLookupUnavailableError)) {
+      throw error;
+    }
+    respondChatHistoryUnavailable(method, respond);
+    return;
+  }
   const {
     cfg,
     agentId: sessionAgentId,
@@ -195,21 +216,7 @@ async function handleChatHistoryRequest({
     storeKeys,
     entry,
     canonicalKey,
-  } = measureDiagnosticsTimelineSpanSync(
-    `gateway.${method}.session_entry`,
-    () =>
-      loadGatewaySessionEntryReadOnly(sessionKey, {
-        agentId: requestedAgent.agentId,
-        // Exact reads own their nested JSON; history only projects that snapshot.
-        clone: false,
-        includeStoreChildEntries: true,
-        projection: "list",
-      }),
-    {
-      config: requestConfig,
-      phase: method,
-    },
-  );
+  } = loadedSession;
   const selectedAgent = validateChatSelectedAgent({
     cfg,
     requestedSessionKey: sessionKey,

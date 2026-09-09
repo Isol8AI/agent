@@ -54,7 +54,6 @@ import {
 } from "../vitest/vitest.ui-e2e.config.ts";
 import { runCiGitStep } from "./ci-git-owner.test-support.js";
 import { runGeneratedPublisherScenario } from "./generated-publisher.test-support.js";
-
 const CHECKOUT_V6 = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1";
 const CACHE_V5 = "actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9";
 const CACHE_SAVE_V5 = "actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9";
@@ -2762,71 +2761,6 @@ NODE
 
   it("pins every external GitHub Action reference to a full commit SHA", () => {
     expect(findUnpinnedExternalActions()).toEqual([]);
-  });
-
-  it("schedules approved Docker refreshes from independently resolved channels", () => {
-    const workflow = readWorkflow(".github/workflows/docker-image-refresh.yml");
-    const releaseWorkflow = readWorkflow(".github/workflows/docker-release.yml");
-    const plan = workflow.jobs.plan;
-    const publish = workflow.jobs.publish;
-    const planSteps = plan.steps as WorkflowStep[];
-    const mainGuard = expectDefined(
-      planSteps.find((step) => step.name === "Require a main-branch run"),
-      "Docker refresh main-branch guard",
-    );
-    const resolve = expectDefined(
-      planSteps.find((step) => step.name === "Resolve refresh plan"),
-      "Docker refresh plan step",
-    );
-
-    expect(workflow.on.schedule).toEqual([{ cron: "17 3 * * 1" }]);
-    expect(workflow.on.workflow_dispatch.inputs.channel).toEqual({
-      description: "Release channel to rebuild",
-      required: false,
-      default: "both",
-      type: "choice",
-      options: ["stable", "extended-stable", "both"],
-    });
-    expect(workflow.on.workflow_dispatch.inputs.dry_run).toEqual({
-      description: "Resolve and summarize without publishing",
-      required: false,
-      default: false,
-      type: "boolean",
-    });
-    expect(plan.permissions).toEqual({ contents: "read" });
-    expect(mainGuard.run).toContain('[[ "${WORKFLOW_REF}" != "refs/heads/main" ]]');
-    expect(resolve.run).toContain("docker-release-policy.mjs --current");
-    expect(resolve.run).toContain('git rev-parse "refs/tags/${stable_tag}^{commit}"');
-    expect(resolve.run).toContain('git rev-parse "refs/tags/${extended_stable_tag}^{commit}"');
-    expect(resolve.run).toContain('suffix="-r$(date -u +%Y%m%d)"');
-    expect(resolve.run).toContain('echo "matrix=${matrix}"');
-    expect(resolve.run).toContain('} >> "${GITHUB_OUTPUT}"');
-    expect(plan.environment).toBeUndefined();
-    expect(publish.environment).toBeUndefined();
-
-    expect(publish.needs).toBe("plan");
-    expect(publish.if).toBe("needs.plan.outputs.dry_run != 'true'");
-    expect(publish.strategy).toEqual({
-      "fail-fast": false,
-      matrix: { include: "${{ fromJSON(needs.plan.outputs.matrix) }}" },
-    });
-    expect(publish.uses).toBe("./.github/workflows/docker-release.yml");
-    expect(publish.with).toEqual({
-      tag: "${{ matrix.tag }}",
-      release_sha: "${{ matrix.release_sha }}",
-      image_tag_suffix: "${{ needs.plan.outputs.image_tag_suffix }}",
-    });
-    expect(publish.secrets).toEqual({
-      DOCKERHUB_USERNAME: "${{ secrets.DOCKERHUB_USERNAME }}",
-      DOCKERHUB_TOKEN: "${{ secrets.DOCKERHUB_TOKEN }}",
-    });
-    expect(publish.permissions).toEqual({
-      actions: "read",
-      attestations: "read",
-      contents: "read",
-      packages: "write",
-    });
-    expect(releaseWorkflow.jobs.publish.environment).toBe("docker-release");
   });
 
   it("forbids moving reusable workflow references", () => {

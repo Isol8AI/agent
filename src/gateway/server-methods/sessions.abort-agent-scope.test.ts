@@ -2,8 +2,10 @@
  * Tests that session abort requests stay scoped to the targeted agent.
  */
 
+import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import type { EmbeddedAgentQueueHandle } from "../../agents/embedded-agent-runner/run-state.js";
 import {
   addSubagentRunForTests,
@@ -15,6 +17,7 @@ import { createReplyOperation } from "../../auto-reply/reply/reply-run-registry.
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
 const chatAbortMock = vi.fn();
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 const resolveSessionKeyForRunMock = vi.fn();
 const listSessionsFromStoreAsyncMock = vi.fn();
 const loadCombinedSessionStoreForGatewayMock = vi.fn();
@@ -1010,10 +1013,11 @@ describe("sessions.abort agent scope", () => {
   });
 
   it("protects bare global when its fixed-store owner is inferred", async () => {
+    const store = path.join(tempDirs.make("session-global-owner-"), "shared.sqlite");
     const context = createContext({
       extra: {
         getRuntimeConfig: () => ({
-          session: { scope: "global", store: "/stores/shared.sqlite" },
+          session: { scope: "global", store },
           agents: {
             ownership: "explicit",
             defaults: { sessionStore: { agentId: "ops" } },

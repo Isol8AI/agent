@@ -129,7 +129,8 @@ export function confirmOpenClawStateDatabaseIntegrity(
   pathname: string,
 ): SqliteIntegrityConfirmation {
   const resolvedPath = path.resolve(pathname);
-  closeOpenClawStateDatabaseByPath(resolvedPath);
+  // A renamed cached inode must not leave its WAL attached to the replacement pathname.
+  closeOpenClawStateDatabaseByPath(resolvedPath, { checkpointMode: "TRUNCATE" });
   return confirmSqliteFileIntegrity(resolvedPath, resolvedPath);
 }
 

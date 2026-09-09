@@ -1,5 +1,8 @@
 // Browser tests cover pw session.create page.navigation guard plugin behavior.
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { chromium } from "playwright-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SsrFBlockedError } from "../infra/net/ssrf.js";
@@ -14,6 +17,7 @@ import {
   wasBrowserNavigationSourcePreservedAfterPolicyDenial,
   withPageNavigationRequestGuard,
 } from "./pw-session.js";
+import { restoreSessionState } from "./session-state-store.js";
 
 const {
   closePlaywrightBrowserConnection,
@@ -312,6 +316,37 @@ describe("pw-session createPageViaPlaywright navigation guard", () => {
 
     expect(pageGoto).toHaveBeenCalledTimes(1);
     expect(pageClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks a persisted origin's private redirect through the native navigation owner", async () => {
+    const { pageGoto, pageClose, getRouteHandler, mainFrame } = installBrowserMocks();
+    mockBlockedRedirectNavigation({
+      pageGoto,
+      getRouteHandler,
+      mainFrame,
+      startUrl: "https://93.184.216.34",
+    });
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "restore-redirect-"));
+    try {
+      const filePath = path.join(dir, "state.json");
+      await fs.writeFile(
+        filePath,
+        JSON.stringify({
+          version: 1,
+          cookies: [],
+          origins: [{ origin: "https://93.184.216.34", localStorage: { token: "must-not-write" } }],
+        }),
+      );
+      const send = vi.fn(async () => ({}));
+      expect(
+        await restoreSessionState(send, filePath, { cdpUrl: "http://127.0.0.1:18792" }),
+      ).toEqual({ cookies: 0, origins: 0 });
+      expect(pageGoto).toHaveBeenCalledTimes(1);
+      expect(pageClose).toHaveBeenCalledTimes(1);
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("blocks private redirect hops even when Playwright marks hop as non-navigation", async () => {

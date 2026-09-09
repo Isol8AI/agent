@@ -574,6 +574,11 @@ export function createProfileAvailability({
       try {
         await waitForCdpReadyAfterLaunch(signal, launched);
         adoptRunning({ profileState: runtime, running: launched, generation, signal });
+        const { restoreManagedBrowserSessionState } = await import("./session-state-launch.js");
+        await restoreManagedBrowserSessionState({ profile, resolved: current.resolved }).catch(
+          () => {},
+        );
+        signal.throwIfAborted();
         resetManagedLaunchFailure(runtime);
       } catch (err) {
         await stopExactRunning(runtime, launched);

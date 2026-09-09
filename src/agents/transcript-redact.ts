@@ -22,6 +22,7 @@ import { resolveProviderEndpoint } from "./provider-attribution.js";
 import type { AgentMessage } from "./runtime/index.js";
 import {
   copyCodeModeSourceAppend,
+  type SourceField,
   readCodeModeSourceFields,
   type CodeModeSourceAppend,
 } from "./transcript-code-mode-source.js";
@@ -108,13 +109,10 @@ const GOOGLE_THOUGHT_SIGNATURE_RE =
 // Transport replay fences use the two-word base-36 output from shortHash.
 const OPENAI_REPLAY_CONTEXT_HASH_RE = /^[a-z0-9]{2,16}$/;
 
-function isOpenAIReplayContextHash(value: unknown): value is string {
-  return typeof value === "string" && OPENAI_REPLAY_CONTEXT_HASH_RE.test(value);
-}
+const isOpenAIReplayContextHash = (value: unknown): value is string =>
+  typeof value === "string" && OPENAI_REPLAY_CONTEXT_HASH_RE.test(value);
 
-function isOpenAIResponsesApi(api: string): boolean {
-  return OPENAI_RESPONSES_APIS.has(api);
-}
+const isOpenAIResponsesApi = (api: string): boolean => OPENAI_RESPONSES_APIS.has(api);
 
 function isOpenAIResponsesRoute(route: TranscriptAssistantRoute | undefined): boolean {
   return typeof route?.api === "string" && isOpenAIResponsesApi(route.api);
@@ -493,8 +491,8 @@ function redactTranscriptStructuredValue(
   location: TranscriptValueLocation = "nested",
   assistantRoute?: TranscriptAssistantRoute,
   modelVisibleToolResult = false,
-  sourceFields?: ReadonlyMap<string, string>,
-  sourceSlots?: ReadonlyMap<object, ReadonlyMap<string, string>>,
+  sourceFields?: ReadonlyMap<string, SourceField>,
+  sourceSlots?: ReadonlyMap<object, ReadonlyMap<string, SourceField>>,
 ): unknown {
   if (typeof value === "string") {
     if (fieldKey) {
@@ -680,9 +678,11 @@ function redactTranscriptStructuredValue(
     if (shouldPreserveTranscriptImagePayload(source, key, item, preserveImageDataUrlFields)) {
       continue;
     }
+    const sourceField = sourceFields?.get(key);
+    const redactSource = sourceField?.redact ?? redactSourceInputTextWithConfig;
     const redacted =
-      typeof item === "string" && sourceFields?.get(key) === item
-        ? redactSourceInputTextWithConfig(item, resolveTranscriptLoggingConfig(cfg))
+      typeof item === "string" && sourceField?.value === item
+        ? redactSource(item, resolveTranscriptLoggingConfig(cfg))
         : redactTranscriptStructuredValue(
             item,
             cfg,
@@ -753,8 +753,8 @@ export function redactTranscriptMessage(
     undefined,
     readCodeModeSourceFields(message, sourceAppend),
   ) as AgentMessage;
-  copyCodeModeSourceAppend(message, redacted, sourceAppend, (source) =>
-    redactSourceInputTextWithConfig(source, resolveTranscriptLoggingConfig(cfg)),
+  copyCodeModeSourceAppend(message, redacted, sourceAppend, (source, field) =>
+    (field.redact ?? redactSourceInputTextWithConfig)(source, resolveTranscriptLoggingConfig(cfg)),
   );
   return redacted;
 }

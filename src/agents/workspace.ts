@@ -85,6 +85,44 @@ const TRANSIENT_WORKSPACE_READ_ERRNOS = new Set([-11, -4]);
 const TRANSIENT_WORKSPACE_READ_MESSAGE = /Unknown system error -(?:11|4)\b/i;
 const workspaceLogger = createSubsystemLogger("workspace");
 
+async function applyIsol8NativeSetupSeed(
+  workspaceDir: string,
+  beforePersistentApply?: () => void,
+): Promise<void> {
+  if (process.env.ISOL8_NATIVE_SETUP_SEED === "0") {
+    return;
+  }
+  const sentinel = path.join(workspaceDir, ".openclaw", "isol8-setup-seed.json");
+  try {
+    const seed: unknown = JSON.parse(await fs.readFile(sentinel, "utf8"));
+    if (!seed || typeof seed !== "object" || Array.isArray(seed)) {
+      throw new Error("Setup seed must be an object");
+    }
+    // SAFETY: JSON was checked above to be a non-null, non-array object; values remain unknown.
+    const fields = seed as Record<string, unknown>;
+    const timestamps: { bootstrapSeededAt?: string; setupCompletedAt?: string } = {};
+    for (const key of ["bootstrapSeededAt", "setupCompletedAt"] as const) {
+      const value = fields[key];
+      if (value != null) {
+        if (typeof value !== "string" || !value) {
+          throw new Error(`Invalid setup seed field: ${key}`);
+        }
+        timestamps[key] = value;
+      }
+    }
+    beforePersistentApply?.();
+    mergeWorkspaceSetupState(workspaceDir, timestamps);
+    beforePersistentApply?.();
+    await fs.unlink(sentinel);
+  } catch (error) {
+    if (!hasErrnoCode(error, "ENOENT")) {
+      workspaceLogger.warn("Isol8 setup seed conversion failed; continuing boot", {
+        error: String(error),
+      });
+    }
+  }
+}
+
 const workspaceTemplateCache = new Map<string, Promise<string>>();
 const gitInitializationInFlight = new Map<string, Promise<void>>();
 
@@ -1008,6 +1046,7 @@ export async function ensureAgentWorkspace(params?: {
     await fs.mkdir(dir, { recursive: true });
     return { dir, bootstrapPending: false };
   }
+  await applyIsol8NativeSetupSeed(dir, beforePersistentApply);
   let initialState = readCanonicalWorkspaceStateSnapshot(dir);
   let reseedingExpiredWorkspaceState = false;
   const recentAttestation = recentWorkspaceAttestation(initialState.attestation);

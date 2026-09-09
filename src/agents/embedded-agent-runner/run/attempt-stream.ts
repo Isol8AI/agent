@@ -84,7 +84,7 @@ export function installEmbeddedAttemptStreamGuards(
 ) {
   const { attempt } = input;
   const {
-    agentSession: { activeSession: session, codeModeExecToolNames },
+    agentSession: { activeSession: session, codeModeExecToolNames, shellExecToolNames },
     anthropicPayloadLogger,
     cacheTrace,
     contextGuards,
@@ -411,10 +411,11 @@ export function installEmbeddedAttemptStreamGuards(
     },
     suppressPluginHooks: attempt.operation === "settled-tool-finalization",
   });
-  if (codeModeExecToolNames?.size) {
+  if (codeModeExecToolNames?.size || shellExecToolNames?.size) {
     session.agent.streamFn = wrapStreamFnCodeModeSource(
       session.agent.streamFn,
-      codeModeExecToolNames,
+      codeModeExecToolNames ?? new Set(),
+      shellExecToolNames,
     );
   }
   return {

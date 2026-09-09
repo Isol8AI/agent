@@ -7,6 +7,7 @@ import { stopBrowserScreencasts } from "./screencast/session.js";
 import type { BrowserServerState } from "./server-context.js";
 import { markBrowserRuntimeStopping } from "./server-context.lifecycle.js";
 import { stopKnownBrowserProfiles } from "./server-lifecycle.js";
+import { startBrowserSessionStateSnapshotTimer } from "./session-state-launch.js";
 import { startTrackedBrowserTabCleanupTimer } from "./session-tab-cleanup.js";
 import { registerBrowserUnhandledRejectionHandler } from "./unhandled-rejections.js";
 
@@ -18,6 +19,7 @@ type CreateBrowserRuntimeStateParams = {
 };
 
 const trackedTabCleanupDisposers = new WeakMap<BrowserServerState, () => Promise<void>>();
+const sessionStateSnapshotDisposers = new WeakMap<BrowserServerState, () => Promise<void>>();
 
 /** Creates Browser server state and starts runtime-wide cleanup handlers. */
 export async function createBrowserRuntimeState(
@@ -34,6 +36,7 @@ export async function createBrowserRuntimeState(
     onWarn: params.onWarn,
   });
   trackedTabCleanupDisposers.set(state, stopTrackedTabCleanup);
+  sessionStateSnapshotDisposers.set(state, startBrowserSessionStateSnapshotTimer({ state }));
   state.stopTrackedTabCleanup = () => {
     void stopTrackedTabCleanup().catch(() => {});
   };
@@ -60,6 +63,9 @@ async function stopBrowserRuntimeInternal(
     return;
   }
   markBrowserRuntimeStopping(current);
+  // Stop timer admission synchronously. Native profile leases drain any active
+  // snapshot before exact-handle shutdown, without delaying invalidation below.
+  const snapshotDrain = sessionStateSnapshotDisposers.get(current)?.();
   let firstError: Error | undefined;
 
   // Viewers receive the shutdown code before profile invalidation closes their targets.
@@ -79,7 +85,12 @@ async function stopBrowserRuntimeInternal(
       current.stopTrackedTabCleanup?.();
     }
   });
-  for (const result of await Promise.allSettled([screencastDrain, profileDrain, tabCleanup])) {
+  for (const result of await Promise.allSettled([
+    snapshotDrain,
+    screencastDrain,
+    profileDrain,
+    tabCleanup,
+  ])) {
     if (result.status === "rejected") {
       firstError ??= toRuntimeLifecycleError(result.reason, "Browser profile cleanup failed.");
     }
@@ -113,6 +124,7 @@ async function stopBrowserRuntimeInternal(
 
     params.clearState();
     trackedTabCleanupDisposers.delete(current);
+    sessionStateSnapshotDisposers.delete(current);
     current.stopUnhandledRejectionHandler?.();
   }
   if (firstError) {

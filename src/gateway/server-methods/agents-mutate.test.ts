@@ -8,6 +8,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AgentDeletionAuthorityRollbackError } from "../../agents/agent-lifecycle-registry.js";
 import { WORKSPACE_BOOTSTRAP_FILENAMES } from "../../agents/workspace.js";
 import { FsSafeError } from "../../infra/fs-safe.js";
+import { resolveWorkshopAgentRoot } from "../../skills/workshop/agent-root.js";
 /* ------------------------------------------------------------------ */
 /* Mocks                                                              */
 /* ------------------------------------------------------------------ */
@@ -2516,12 +2517,17 @@ describe("agents.delete", () => {
     const { respond, promise } = makeCall("agents.delete", { agentId: "test-agent" });
     await promise;
 
-    expectRespondOk(respond, { ok: true, removed: [], failed: [] });
+    const workshopDir = resolveWorkshopAgentRoot("test-agent");
+    expectRespondOk(respond, {
+      ok: true,
+      removed: [{ path: workshopDir, method: "trash" }],
+      failed: [],
+    });
     expect(mocks.closeOpenClawAgentDatabaseByPath).toHaveBeenCalledWith(
       "/journal/agent/openclaw-agent.sqlite",
       "test-agent",
     );
-    expect(mocks.movePathToTrash).not.toHaveBeenCalled();
+    expect(mocks.movePathToTrash.mock.calls).toEqual([[workshopDir]]);
     expect(mocks.beginAgentDeletionFinish).toHaveBeenCalledOnce();
   });
 

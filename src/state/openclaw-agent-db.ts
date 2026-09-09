@@ -145,7 +145,8 @@ export function confirmOpenClawAgentDatabaseIntegrity(
   pathname: string,
 ): SqliteIntegrityConfirmation {
   const resolvedPath = path.resolve(pathname);
-  closeOpenClawAgentDatabaseByPath(resolvedPath);
+  // A renamed cached inode must not leave its WAL attached to the replacement pathname.
+  closeOpenClawAgentDatabaseByPath(resolvedPath, undefined, { checkpointMode: "TRUNCATE" });
   // Closing breaks process ownership of the pathname. A replacement must
   // revalidate and claim its schema before the path can become trusted again.
   invalidateOpenClawAgentDatabaseValidation(resolvedPath);

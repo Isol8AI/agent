@@ -1,0 +1,428 @@
+/**
+ * Browser session-state snapshot/restore.
+ *
+ * Persists a managed browser's *state* — cookies + per-origin localStorage —
+ * to a single JSON so an owner's logged-in sessions survive a container/browser
+ * restart. Deliberately NOT the Chrome user-data-dir (LevelDB/SQLite): that
+ * class of state must never live on EFS/NFS (the O6 `database is locked`
+ * hazard). Persist state, not the profile dir — mirrors Browserbase Contexts.
+ *
+ * Snapshots use browser-level CDP. Restore creates temporary pages through
+ * the native guarded navigation path before applying origin-bound storage.
+ */
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import type { CdpSendFn } from "./cdp.helpers.js";
+import { DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME } from "./constants.js";
+import { assertBrowserNavigationAllowed } from "./navigation-guard.js";
+import type { createPageViaPlaywright } from "./pw-session-actions.js";
+
+const SESSION_STATE_VERSION = 1;
+
+/** How long to wait for a throwaway restore tab to commit on its origin. */
+const ORIGIN_COMMIT_ATTEMPTS = 8;
+const ORIGIN_COMMIT_POLL_MS = 250;
+
+const DEFAULT_SNAPSHOT_PATH = "~/.openclaw/browser-state/state.json";
+const DEFAULT_INTERVAL_SECONDS = 60;
+const MIN_INTERVAL_SECONDS = 15;
+
+export type SessionStateConfig = {
+  enabled?: boolean;
+  intervalSeconds?: number;
+  path?: string;
+};
+
+export type ResolvedSessionStateConfig = {
+  enabled: boolean;
+  intervalMs: number;
+  path: string;
+};
+
+/** Preserve the legacy file for the canonical openclaw profile only. */
+export function resolveProfileSessionStatePath(snapshotPath: string, profileName: string): string {
+  return profileName === DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME
+    ? snapshotPath
+    : `${snapshotPath}.profile-${encodeURIComponent(profileName)}.json`;
+}
+
+type RestoreNavigation = Omit<Parameters<typeof createPageViaPlaywright>[0], "url">;
+
+/** Expand a leading `~`/`~/` against the process home dir. */
+function expandHome(input: string): string {
+  if (input === "~") {
+    return os.homedir();
+  }
+  if (input.startsWith("~/") || input.startsWith("~\\")) {
+    return path.join(os.homedir(), input.slice(2));
+  }
+  return input;
+}
+
+/**
+ * Resolve the browser.sessionState config with defaults. Presence of the block
+ * turns the feature on (enabled defaults true); set enabled:false to keep the
+ * block but disable it. Interval is floored to avoid wake-spam.
+ */
+export function resolveSessionStateConfig(
+  sessionState?: SessionStateConfig | null,
+): ResolvedSessionStateConfig {
+  const enabled = sessionState != null && sessionState.enabled !== false;
+  const rawInterval = sessionState?.intervalSeconds;
+  const intervalSeconds =
+    typeof rawInterval === "number" && Number.isFinite(rawInterval)
+      ? Math.max(MIN_INTERVAL_SECONDS, Math.floor(rawInterval))
+      : DEFAULT_INTERVAL_SECONDS;
+  const rawPath = typeof sessionState?.path === "string" ? sessionState.path.trim() : "";
+  return {
+    enabled,
+    intervalMs: intervalSeconds * 1000,
+    path: expandHome(rawPath || DEFAULT_SNAPSHOT_PATH),
+  };
+}
+
+type SessionCookie = Record<string, unknown>;
+type OriginState = { origin: string; localStorage: Record<string, string> };
+type SessionStateFile = {
+  version: number;
+  savedAt: string;
+  cookies: SessionCookie[];
+  origins: OriginState[];
+};
+
+/** http/https origin usable for storage persistence, or null (chrome://, about:, …). */
+function persistableOrigin(url: unknown): string | null {
+  if (typeof url !== "string" || !url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+/** Keep only string→string entries; CDP returnByValue can carry non-strings. */
+function coerceStringMap(value: unknown): Record<string, string> {
+  if (!isRecord(value)) {
+    return {};
+  }
+  const out: Record<string, string> = Object.create(null);
+  for (const [key, val] of Object.entries(value)) {
+    if (typeof val === "string") {
+      out[key] = val;
+    }
+  }
+  return out;
+}
+
+/** Write JSON via a sibling temp file + rename so a crash never leaves a partial. */
+async function atomicWriteJson(outPath: string, payload: unknown): Promise<void> {
+  await writeJsonFileAtomically(path.resolve(outPath), payload);
+}
+
+/** Read all cookies across browser contexts. */
+async function readAllCookies(send: CdpSendFn): Promise<SessionCookie[]> {
+  const res = await send("Storage.getCookies");
+  const cookies = isRecord(res) ? res.cookies : undefined;
+  return Array.isArray(cookies) ? cookies.filter(isRecord) : [];
+}
+
+/** Read one page target's localStorage as a string map (attach → evaluate → detach). */
+async function readOriginLocalStorage(
+  send: CdpSendFn,
+  targetId: string,
+  origin: string,
+): Promise<OriginState | null> {
+  const attached = await send("Target.attachToTarget", {
+    targetId,
+    flatten: true,
+  });
+  const sessionId =
+    isRecord(attached) && typeof attached.sessionId === "string" ? attached.sessionId : undefined;
+  if (!sessionId) {
+    return null;
+  }
+  try {
+    const res = await send(
+      "Runtime.evaluate",
+      {
+        expression: `(() => { const origin = location.origin; return origin === ${JSON.stringify(origin)} ? { origin, localStorage: Object.fromEntries(Object.entries(localStorage)) } : null; })()`,
+        returnByValue: true,
+      },
+      sessionId,
+    );
+    const value = isRecord(res) && isRecord(res.result) ? res.result.value : undefined;
+    return isRecord(value) && value.origin === origin && isRecord(value.localStorage)
+      ? { origin, localStorage: coerceStringMap(value.localStorage) }
+      : null;
+  } finally {
+    await send("Target.detachFromTarget", { sessionId }).catch(() => {});
+  }
+}
+
+/** Collect per-origin localStorage from all open http/https page targets (deduped by origin). */
+async function readAllOrigins(send: CdpSendFn): Promise<OriginState[]> {
+  const res = await send("Target.getTargets");
+  const infos =
+    isRecord(res) && Array.isArray(res.targetInfos) ? res.targetInfos.filter(isRecord) : [];
+  const seen = new Set<string>();
+  const out: OriginState[] = [];
+  for (const info of infos) {
+    if (info?.type !== "page") {
+      continue;
+    }
+    const origin = persistableOrigin(info?.url);
+    if (!origin || seen.has(origin)) {
+      continue;
+    }
+    const targetId = typeof info?.targetId === "string" ? info.targetId : undefined;
+    if (!targetId) {
+      continue;
+    }
+    const observed = await readOriginLocalStorage(send, targetId, origin).catch(() => null);
+    if (observed) {
+      seen.add(origin);
+      out.push(observed);
+    }
+  }
+  return out;
+}
+
+/**
+ * Snapshot the browser's cookies + per-origin localStorage to `outPath` as a
+ * v1 JSON, written atomically. Returns the counts persisted.
+ */
+export async function snapshotSessionState(
+  send: CdpSendFn,
+  outPath: string,
+): Promise<{ cookies: number; origins: number }> {
+  const cookies = await readAllCookies(send);
+  const previous = await readSessionState(outPath);
+  const originsByName = new Map(
+    (previous?.origins ?? [])
+      .filter((entry) => persistableOrigin(entry.origin) === entry.origin)
+      .map((entry) => [entry.origin, entry]),
+  );
+  for (const entry of await readAllOrigins(send)) {
+    originsByName.set(entry.origin, entry);
+  }
+  const origins = [...originsByName.values()];
+  const payload: SessionStateFile = {
+    version: SESSION_STATE_VERSION,
+    savedAt: new Date().toISOString(),
+    cookies,
+    origins,
+  };
+  await atomicWriteJson(outPath, payload);
+  return { cookies: cookies.length, origins: origins.length };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/** Drop fields Network.CookieParam rejects; require name+value. */
+function toCookieParam(cookie: unknown): SessionCookie | null {
+  if (!isRecord(cookie)) {
+    return null;
+  }
+  const copy = { ...cookie };
+  if (typeof copy.name !== "string" || typeof copy.value !== "string") {
+    return null;
+  }
+  // `size`, `session`, and `partitionKeyOpaque` are read-only Cookie fields,
+  // not accepted as Network.CookieParam (partitionKeyOpaque rejection breaks
+  // CHIPS/partitioned cookies in the bulk call).
+  delete copy.size;
+  delete copy.session;
+  delete copy.partitionKeyOpaque;
+  // Storage.getCookies marks a session cookie with `expires: -1`. Storage.setCookies
+  // has NO -1=session convention — it reads -1 as a 1969 expiry, i.e. an
+  // already-expired cookie it silently drops. Omitting `expires` is how CDP
+  // expresses a session cookie (matches system-chrome-cookies.ts). Without this,
+  // every session cookie — exactly what keeps a user logged in — is lost on restore.
+  if (typeof copy.expires !== "number" || !Number.isFinite(copy.expires) || copy.expires <= 0) {
+    delete copy.expires;
+  }
+  return copy;
+}
+
+/** Set cookies in one call; on failure retry per-cookie so one bad cookie doesn't abort. */
+async function restoreCookies(send: CdpSendFn, cookies: unknown[]): Promise<number> {
+  const params = cookies.map(toCookieParam).filter((c): c is SessionCookie => c != null);
+  if (params.length === 0) {
+    return 0;
+  }
+  try {
+    await send("Storage.setCookies", { cookies: params });
+    return params.length;
+  } catch {
+    let added = 0;
+    for (const cookie of params) {
+      try {
+        await send("Storage.setCookies", { cookies: [cookie] });
+        added += 1;
+      } catch {
+        // Individual cookie rejected by Chrome; counted as not restored.
+      }
+    }
+    return added;
+  }
+}
+
+/** Poll a throwaway tab until its committed document is on the target origin. */
+async function waitForTargetOrigin(
+  send: CdpSendFn,
+  sessionId: string,
+  origin: string,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < ORIGIN_COMMIT_ATTEMPTS; attempt += 1) {
+    const res = await send(
+      "Runtime.evaluate",
+      { expression: "location.origin", returnByValue: true },
+      sessionId,
+    ).catch(() => null);
+    if (isRecord(res) && isRecord(res.result) && res.result.value === origin) {
+      return true;
+    }
+    if (attempt < ORIGIN_COMMIT_ATTEMPTS - 1) {
+      await delay(ORIGIN_COMMIT_POLL_MS);
+    }
+  }
+  return false;
+}
+
+/**
+ * Restore one origin's localStorage by navigating a throwaway tab to it and
+ * replaying the items. Per-item failure is tolerated inside the page. Returns
+ * true when the items were written.
+ */
+async function restoreOriginLocalStorage(
+  send: CdpSendFn,
+  entry: unknown,
+  navigation?: RestoreNavigation,
+): Promise<boolean> {
+  if (!isRecord(entry)) {
+    return false;
+  }
+  const origin = typeof entry.origin === "string" ? entry.origin : "";
+  const items = coerceStringMap(entry.localStorage);
+  const pairs = Object.entries(items);
+  if (!origin || persistableOrigin(origin) !== origin || pairs.length === 0 || !navigation) {
+    return false;
+  }
+
+  // CDP control-socket pinning does not authorize page traffic. Native Playwright
+  // navigation guards the initial URL, document requests and redirect chain.
+  await assertBrowserNavigationAllowed({ ...navigation, url: origin });
+  const { createPageViaPlaywright } = await import("./pw-session-actions.js");
+  const created = await createPageViaPlaywright({ ...navigation, url: origin });
+  const targetId = typeof created?.targetId === "string" ? created.targetId : undefined;
+  if (!targetId) {
+    return false;
+  }
+  try {
+    const attached = await send("Target.attachToTarget", {
+      targetId,
+      flatten: true,
+    }).catch(() => null);
+    const sessionId =
+      isRecord(attached) && typeof attached.sessionId === "string" ? attached.sessionId : undefined;
+    if (!sessionId) {
+      return false;
+    }
+    if (!(await waitForTargetOrigin(send, sessionId, origin))) {
+      return false;
+    }
+    // Replay every item in the page with a per-item try/catch so a single
+    // rejected key (e.g. a quota error) never aborts the rest.
+    const expr =
+      `(function(items){if(location.origin!==${JSON.stringify(origin)})return null;var n=0;for(var i=0;i<items.length;i++){` +
+      `try{localStorage.setItem(items[i][0],items[i][1]);n++;}catch(e){}}return n;})` +
+      `(${JSON.stringify(pairs)})`;
+    const res = await send(
+      "Runtime.evaluate",
+      { expression: expr, returnByValue: true },
+      sessionId,
+    ).catch(() => null);
+    return isRecord(res) && isRecord(res.result) && typeof res.result.value === "number";
+  } finally {
+    await send("Target.closeTarget", { targetId }).catch(() => {});
+  }
+}
+
+/**
+ * Restore a v1 snapshot from `inPath` into the running browser. Returns null if
+ * the file is absent, unreadable, or a version mismatch (no CDP calls made in
+ * those cases). Idempotent and best-effort: individual cookie/origin failures
+ * are swallowed so a partial snapshot still restores what it can.
+ */
+export async function restoreSessionState(
+  send: CdpSendFn,
+  inPath: string,
+  navigation?: RestoreNavigation,
+): Promise<{ cookies: number; origins: number } | null> {
+  const file = await readSessionState(inPath);
+  if (!file) {
+    return null;
+  }
+  const cookieCount = await restoreCookies(send, file.cookies);
+  let originCount = 0;
+  for (const entry of file.origins) {
+    try {
+      if (await restoreOriginLocalStorage(send, entry, navigation)) {
+        originCount += 1;
+      }
+    } catch {
+      // Policy denials and unavailable origins remain persisted for a later retry.
+    }
+  }
+  return { cookies: cookieCount, origins: originCount };
+}
+
+async function readSessionState(inPath: string): Promise<SessionStateFile | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(inPath, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) {
+    return null;
+  }
+  const file = parsed;
+  if (file.version !== SESSION_STATE_VERSION) {
+    return null;
+  }
+
+  return {
+    version: SESSION_STATE_VERSION,
+    savedAt: typeof file.savedAt === "string" ? file.savedAt : "",
+    cookies: Array.isArray(file.cookies) ? file.cookies.filter(isRecord) : [],
+    origins: Array.isArray(file.origins)
+      ? file.origins
+          .filter(isRecord)
+          .flatMap((entry) =>
+            typeof entry.origin === "string"
+              ? [{ origin: entry.origin, localStorage: coerceStringMap(entry.localStorage) }]
+              : [],
+          )
+      : [],
+  };
+}

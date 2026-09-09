@@ -137,6 +137,11 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
   const bundleMcpRuntime = bundleMcpAcquisition
     ? await materializeBundleMcpToolsForRun({
         ...bundleMcpAcquisition,
+        // Only directory controls await the coordinated catalog/session/prompt-policy owner.
+        nonBlocking:
+          !params.preparedToolBase.codeModeControlsEnabledForRun &&
+          params.preparedToolBase.toolSearchControlsEnabledForRun &&
+          params.preparedToolBase.toolSearchConfig.mode === "directory",
         agentId: params.setup.sessionAgentId,
         reservedToolNames: [
           ...tools.map((tool) => tool.name),
@@ -165,46 +170,49 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
           ],
         })
       : undefined;
-    const allowedBundleMcpTools = applyEmbeddedAttemptToolsAllow(
-      bundleMcpRuntime?.tools ?? [],
-      effectiveToolsAllow,
-      { toolMeta: (tool) => getPluginToolMeta(tool) },
-    );
-    const allowedBundleLspTools = applyEmbeddedAttemptToolsAllow(
-      bundleLspRuntime?.tools ?? [],
-      effectiveToolsAllow,
-      { toolMeta: (tool) => getPluginToolMeta(tool) },
-    );
-    const filteredBundledTools = applyFinalEffectiveToolPolicy({
-      bundledTools: [...allowedBundleMcpTools, ...allowedBundleLspTools],
-      config: params.attempt.config,
-      workspaceDir: params.setup.effectiveWorkspace,
-      metadataSnapshot: bundleMetadataSnapshot,
-      conversationCapabilityProfile: runtimeCapabilityProfile,
-      warn: (message) => log.warn(message),
-    });
-    if (bundleMcpRuntime?.restrictAppTools) {
-      const runtimeAllowedAppTools = applyEmbeddedAttemptToolsAllow(
-        bundleMcpRuntime.appTools ?? bundleMcpRuntime.tools,
+    const projectBundledTools = () => {
+      const allowedBundleMcpTools = applyEmbeddedAttemptToolsAllow(
+        bundleMcpRuntime?.tools ?? [],
         effectiveToolsAllow,
         { toolMeta: (tool) => getPluginToolMeta(tool) },
       );
-      const allowedAppTools = applyFinalEffectiveToolPolicy({
-        bundledTools: runtimeAllowedAppTools,
+      const allowedBundleLspTools = applyEmbeddedAttemptToolsAllow(
+        bundleLspRuntime?.tools ?? [],
+        effectiveToolsAllow,
+        { toolMeta: (tool) => getPluginToolMeta(tool) },
+      );
+      const filteredBundledTools = applyFinalEffectiveToolPolicy({
+        bundledTools: [...allowedBundleMcpTools, ...allowedBundleLspTools],
         config: params.attempt.config,
         workspaceDir: params.setup.effectiveWorkspace,
         metadataSnapshot: bundleMetadataSnapshot,
         conversationCapabilityProfile: runtimeCapabilityProfile,
         warn: (message) => log.warn(message),
       });
-      // The view outlives this attempt; capture policy against the complete MCP catalog now.
-      bundleMcpRuntime.restrictAppTools(allowedAppTools);
-    }
-    const normalizedBundledTools =
-      filteredBundledTools.length > 0 ? normalizeTools(filteredBundledTools) : filteredBundledTools;
+      if (bundleMcpRuntime?.restrictAppTools) {
+        const runtimeAllowedAppTools = applyEmbeddedAttemptToolsAllow(
+          bundleMcpRuntime.appTools ?? bundleMcpRuntime.tools,
+          effectiveToolsAllow,
+          { toolMeta: (tool) => getPluginToolMeta(tool) },
+        );
+        const allowedAppTools = applyFinalEffectiveToolPolicy({
+          bundledTools: runtimeAllowedAppTools,
+          config: params.attempt.config,
+          workspaceDir: params.setup.effectiveWorkspace,
+          metadataSnapshot: bundleMetadataSnapshot,
+          conversationCapabilityProfile: runtimeCapabilityProfile,
+          warn: (message) => log.warn(message),
+        });
+        // The view outlives this attempt; capture policy against the complete MCP catalog now.
+        bundleMcpRuntime.restrictAppTools(allowedAppTools);
+      }
+      return filteredBundledTools.length > 0
+        ? normalizeTools(filteredBundledTools)
+        : filteredBundledTools;
+    };
     const projectTools = (coreTools: typeof toolsRaw) => {
       const projectedTools = filterLocalModelLeanTools({
-        tools: [...coreTools, ...normalizedBundledTools].map((tool) =>
+        tools: [...coreTools, ...projectBundledTools()].map((tool) =>
           wrapToolWithAbortSignal(tool, params.preparedToolBase.toolAbortSignal),
         ),
         config: params.attempt.config,

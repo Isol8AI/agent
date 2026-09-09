@@ -453,6 +453,7 @@ export function validateHttpOrigin(value: string): boolean {
 export const McpConfigSchema = z
   .strictObject({
     sessionIdleTtlMs: z.number().finite().min(0).optional(),
+    runtimeScope: z.enum(["session", "shared"]).optional(),
     servers: createMcpServersSchema(McpServerNameSchema).optional(),
     apps: z
       .strictObject({

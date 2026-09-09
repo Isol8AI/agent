@@ -574,7 +574,7 @@ describe("legacy MCP OAuth Doctor migration", () => {
     expect(receipt(env)).toBeUndefined();
   });
 
-  it("uses the receipt for cleanup-only retries and cannot resurrect deleted canonical state", async () => {
+  it("imports a recreated external seed despite a receipt while retiring the old claim", async () => {
     const { env, stateDir } = useStateDir();
     const sourcePath = await writeLegacy({ stateDir });
     const first = await migrate(stateDir, env, {
@@ -596,9 +596,9 @@ describe("legacy MCP OAuth Doctor migration", () => {
 
     expect(retry.warnings).toEqual([]);
     expect(retry.changes).toContain(
-      "Discarded recreated retired MCP OAuth JSON without importing it.",
+      "Reconciled recreated MCP OAuth seed and retired import claims.",
     );
-    expect(storeRow(env)).toBeUndefined();
+    expect(JSON.parse(storeRow(env)!.store_json).tokens.access_token).toBe("decoy-token");
     expect(fs.existsSync(sourcePath)).toBe(false);
     expect(fs.existsSync(`${sourcePath}.doctor-importing`)).toBe(false);
     expect(receipt(env, sourcePath)).toMatchObject({ removed_source: 1 });

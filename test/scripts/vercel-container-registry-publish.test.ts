@@ -473,23 +473,9 @@ describe("Vercel Container Registry publishing", () => {
   });
 
   it("transports only secret-safe digests across the VCR workflow boundary", () => {
-    const dockerRelease = readWorkflow(".github/workflows/docker-release.yml");
-    const releaseWorkflow = readWorkflow(".github/workflows/openclaw-release-publish.yml");
     const reusable = readWorkflow(".github/workflows/vercel-container-registry-publish.yml");
-    const dockerPublish = requireJob(dockerRelease, "publish");
-    const releasePublish = requireJob(releaseWorkflow, "publish_vcr");
     const reusablePublish = requireJob(reusable, "publish");
 
-    expect(dockerPublish.outputs?.vcr_source_digests).toBe(
-      "${{ steps.promote.outputs.vcr_source_digests }}",
-    );
-    expect(dockerRelease.on?.workflow_call?.outputs?.vcr_source_digests?.value).toBe(
-      "${{ jobs.publish.outputs.vcr_source_digests }}",
-    );
-
-    expect(releasePublish.with?.source_digests).toBe(
-      "${{ needs.publish_docker.outputs.vcr_source_digests }}",
-    );
     expect(reusable.on?.workflow_call?.inputs?.source_digests).toEqual({
       description: "Newline-delimited alias=sha256:<64 lowercase hex> entries",
       required: true,
@@ -508,51 +494,26 @@ describe("Vercel Container Registry publishing", () => {
 
   it("keeps direct VCR recovery blocking without exposing an advisory dispatch input", () => {
     const reusable = readWorkflow(".github/workflows/vercel-container-registry-publish.yml");
-    const releaseWorkflow = readWorkflow(".github/workflows/openclaw-release-publish.yml");
 
     expect(reusable.on?.workflow_dispatch?.inputs).not.toHaveProperty("advisory");
     expect(requireJob(reusable, "publish")["continue-on-error"]).toBe(
       "${{ inputs.advisory == true }}",
     );
-    expect(requireJob(releaseWorkflow, "publish_vcr").with?.advisory).toBe(true);
   });
 
-  it("isolates best-effort VCR publication from Docker and GitHub release finalization", () => {
+  it("retains guarded direct VCR recovery without automated publisher callers", () => {
     const reusable = readWorkflow(".github/workflows/vercel-container-registry-publish.yml");
-    const dockerRelease = readWorkflow(".github/workflows/docker-release.yml");
-    const releaseWorkflow = readWorkflow(".github/workflows/openclaw-release-publish.yml");
     const manualPromotion = readWorkflow(".github/workflows/docker-channel-promote.yml");
     const recoveryValidation = requireJob(reusable, "validate_recovery");
     const recoveryApproval = requireJob(reusable, "approve_recovery");
     const reusablePublish = requireJob(reusable, "publish");
-    const releasePublish = requireJob(releaseWorkflow, "publish_vcr");
-    const finalizeRelease = requireJob(releaseWorkflow, "finalize_github_release");
     const manualResolve = requireJob(manualPromotion, "resolve");
     const manualApproval = requireJob(manualPromotion, "approve");
 
-    expect(requireJob(dockerRelease, "publish").concurrency).toEqual({
-      group: "docker-release-publish",
-      "cancel-in-progress": false,
-      queue: "max",
-    });
     expect(reusable.concurrency).toEqual({
       group: "vcr-release-publish",
       "cancel-in-progress": false,
     });
-    expect(dockerRelease.jobs?.["publish-vcr"]).toBeUndefined();
-    expect(releasePublish.needs).toEqual(["publish_docker"]);
-    expect(releasePublish.if).not.toContain("beta");
-    expect(releasePublish.uses).toBe("./.github/workflows/vercel-container-registry-publish.yml");
-    expect(releasePublish.with).toMatchObject({
-      advisory: true,
-      include_browser: "${{ needs.publish_docker.outputs.include_browser == 'true' }}",
-      version: "${{ needs.publish_docker.outputs.version }}",
-    });
-    expect(releasePublish.secrets).toEqual({
-      VERCEL_TOKEN: "${{ secrets.VERCEL_TOKEN }}",
-    });
-    expect(finalizeRelease.needs).toEqual(["publish", "publish_docker"]);
-    expect(finalizeRelease.if).not.toContain("publish_vcr");
     expect(recoveryValidation.if).toBe("${{ !inputs.advisory }}");
     expect(recoveryValidation.permissions).toEqual({});
     expect(recoveryValidation.environment).toBeUndefined();
@@ -595,7 +556,7 @@ describe("Vercel Container Registry publishing", () => {
           "uses: ./.github/workflows/vercel-container-registry-publish.yml",
         ),
       );
-    expect(reusableCallers).toEqual(["openclaw-release-publish.yml"]);
+    expect(reusableCallers).toEqual([]);
     expect(reusable.on?.workflow_call?.inputs?.advisory).toEqual({
       description: "Keep automated release mirroring non-blocking",
       required: true,

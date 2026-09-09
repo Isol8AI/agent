@@ -64,6 +64,12 @@ export type BrowserConfig = {
   snapshotDefaults?: BrowserSnapshotDefaults;
   /** Best-effort cleanup policy for tabs opened by primary-agent browser sessions. */
   tabCleanup?: BrowserTabCleanupConfig;
+  /** Persist managed-browser cookies and localStorage across restarts. */
+  sessionState?: {
+    enabled?: boolean;
+    intervalSeconds?: number;
+    path?: string;
+  };
   /** Chrome extension relay authentication compatibility settings. */
   extensionRelay?: BrowserExtensionRelayConfig;
   /** SSRF policy for browser navigation/open-tab operations. */

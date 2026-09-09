@@ -1,11 +1,15 @@
 // Doctor-only import for retired per-server MCP OAuth JSON stores.
 import fs from "node:fs";
 import path from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { root, type Root } from "@openclaw/fs-safe";
 import { mcpOAuthStoreKeyFromLegacyFileName } from "../agents/mcp-oauth-identity.js";
-import { parseMcpOAuthStoreJson } from "../agents/mcp-oauth-store.js";
+import { parseMcpOAuthStoreJson, updateMcpOAuthStore } from "../agents/mcp-oauth-store.js";
+import { resolveStateDir } from "../config/paths.js";
+import { logWarn } from "../logger.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
+import { hasErrnoCode } from "./errno.js";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -247,9 +251,47 @@ async function cleanupReceiptAuthoritativeSources(params: {
     if (!(await params.stateRoot.exists(relativeLegacyPath(params.stateDir, candidate)))) {
       continue;
     }
-    await readLegacySourceSnapshot(params.stateRoot, params.stateDir, candidate, {
-      parseStore: false,
+    const snapshot = await readLegacySourceSnapshot(params.stateRoot, params.stateDir, candidate, {
+      parseStore: candidate === params.sourcePath,
     });
+    if (candidate === params.sourcePath) {
+      const storeKey = storeKeyForSource(candidate);
+      const storeJson = JSON.stringify(snapshot.store);
+      parseMcpOAuthStoreJson(storeKey, storeJson);
+      runOpenClawStateWriteTransaction(
+        ({ db }) => {
+          executeSqliteQuerySync(
+            db,
+            getNodeSqliteKysely<McpOAuthMigrationDatabase>(db)
+              .insertInto("mcp_oauth_stores")
+              .values({
+                store_key: storeKey,
+                format_version: 1,
+                store_json: storeJson,
+                updated_at: Date.now(),
+              })
+              .onConflict((conflict) =>
+                conflict.column("store_key").doUpdateSet({
+                  format_version: 1,
+                  store_json: storeJson,
+                  updated_at: Date.now(),
+                }),
+              ),
+          );
+        },
+        { env: params.env },
+      );
+    }
+    if (
+      !snapshotsMatch(
+        snapshot,
+        await readLegacySourceSnapshot(params.stateRoot, params.stateDir, candidate, {
+          parseStore: false,
+        }),
+      )
+    ) {
+      throw new Error("Seeded MCP OAuth source changed before cleanup");
+    }
     if (params.removeSource) {
       await params.removeSource(candidate);
     } else {
@@ -282,7 +324,7 @@ async function migrateOneStore(params: {
     try {
       const removed = await cleanupReceiptAuthoritativeSources({ ...params, receipt });
       if (removed > 0) {
-        changes.push("Discarded recreated retired MCP OAuth JSON without importing it.");
+        changes.push("Reconciled recreated MCP OAuth seed and retired import claims.");
       }
     } catch (error) {
       warnings.push(`MCP OAuth state is in SQLite, but legacy cleanup failed: ${String(error)}`);
@@ -382,6 +424,62 @@ async function migrateOneStore(params: {
   );
   notices.push("Removed retired MCP OAuth JSON after verified SQLite import.");
   return { changes, warnings, notices };
+}
+
+/** Import an exact operator seed under the caller's native OAuth lease. */
+export async function importLegacyMcpOAuthStoreFile(
+  storeKey: string,
+  assertOwnedInTransaction: (database: DatabaseSync) => void,
+): Promise<void> {
+  if (mcpOAuthStoreKeyFromLegacyFileName(`${storeKey}.json`) !== storeKey) {
+    return;
+  }
+  const stateDir = resolveStateDir();
+  const sourcePath = path.join(stateDir, LEGACY_MCP_OAUTH_DIR, `${storeKey}.json`);
+  try {
+    const stateRoot = await root(stateDir, {
+      hardlinks: "reject",
+      symlinks: "reject",
+      maxBytes: MAX_LEGACY_STORE_BYTES,
+    });
+    const source = new LegacyMigrationSourceClaim<LegacySourceSnapshot>({
+      stateRoot,
+      stateDir,
+      sourcePath,
+      label: "MCP OAuth seed",
+      claimSuffix: ".isol8-importing",
+      readSnapshot: (candidate) => readLegacySourceSnapshot(stateRoot, stateDir, candidate),
+    });
+    if (!(await source.exists()) && !(await source.exists(true))) {
+      return;
+    }
+    await withRootBoundedLegacyFileLock(
+      { stateRoot, targetRelativePath: source.sourceRelativePath },
+      async () => {
+        await source.recover("Conflicting MCP OAuth seed and interrupted claim");
+        const snapshot = await source.read();
+        try {
+          const claimed = await source.claim({
+            snapshot,
+            mismatchMessage: "MCP OAuth seed changed before import",
+          });
+          const store = parseMcpOAuthStoreJson(storeKey, JSON.stringify(claimed.store));
+          updateMcpOAuthStore(storeKey, () => store, assertOwnedInTransaction);
+          if (!snapshotsMatch(claimed, await source.read(true))) {
+            throw new Error("MCP OAuth seed changed after import");
+          }
+          await source.remove();
+        } catch (error) {
+          await source.restore();
+          throw error;
+        }
+      },
+    );
+  } catch (error) {
+    if (!hasErrnoCode(error, "ENOENT") && !hasErrnoCode(error, "not-found")) {
+      logWarn("mcp-oauth: seeded store import failed; source retained for retry");
+    }
+  }
 }
 
 async function migrateWithExclusiveStateOwnership(params: {

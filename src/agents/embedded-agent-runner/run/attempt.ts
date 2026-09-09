@@ -238,7 +238,10 @@ export async function runEmbeddedAttempt(
     );
     bundleMcpRuntime = preparedBundleTools.bundleMcpRuntime;
     bundleLspRuntime = preparedBundleTools.bundleLspRuntime;
-    const { clientTools, uncompactedEffectiveTools } = preparedBundleTools;
+    const { uncompactedEffectiveTools } = preparedBundleTools;
+    let refreshTools: () => void = () => {
+      throw new Error("Tool refresh owner is unavailable for this run.");
+    };
     // Catalog preparation registers global run state before tool projection and
     // diagnostics, so arm cleanup before either can fail and leak the catalog.
     toolSearchCatalogApplied = toolSearchCatalogRef !== undefined;
@@ -247,7 +250,8 @@ export async function runEmbeddedAttempt(
         attempt: params,
         setup,
         preparedToolBase,
-        bundleTools: { clientTools, uncompactedEffectiveTools },
+        bundleTools: preparedBundleTools,
+        refreshTools: () => refreshTools(),
         runTrace,
         abortSignal: runAbortController.signal,
         executeCodeModeTool: (toolParams) => {
@@ -334,6 +338,12 @@ export async function runEmbeddedAttempt(
           ...(params.swarmCollector && params.swarmOutputSchema ? ["structured_output"] : []),
         ],
       });
+      refreshTools = () => {
+        preparedBundleTools.refreshTools();
+        preparedToolCatalog.refreshTools();
+        preparedSessionRuntime.agentSession.refreshTools();
+        promptToolPolicy.refresh();
+      };
       const executionResult = await runEmbeddedAttemptExecutionPhase({
         attempt: params,
         ...(activeContextEngine ? { activeContextEngine } : {}),
@@ -358,10 +368,7 @@ export async function runEmbeddedAttempt(
         lifecycle: {
           applyPermissionMode: (mode, revokeApprovals) => {
             preparedToolBase.refreshPermissionMode(mode, revokeApprovals);
-            preparedBundleTools.refreshTools();
-            preparedToolCatalog.refreshTools();
-            preparedSessionRuntime.agentSession.refreshTools();
-            promptToolPolicy.refresh();
+            refreshTools();
             const preparePermissionPrompt = preparedSystemPrompt.preparePermissionPrompt;
             preparedSessionRuntime.agentSession.setPermissionPromptPreparation(
               preparePermissionPrompt

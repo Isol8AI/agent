@@ -243,18 +243,20 @@ export function installEmbeddedAttemptContextGuards(input: {
 
   const contextPruning = attempt.config?.agents?.defaults?.contextPruning;
   // Disabled pruning must not resolve provider hooks and cold-load plugin metadata.
-  const cacheTtlSettings =
+  const cacheTtlSettings = resolveCacheTtlPruningSettings(
     contextPruning?.mode === "cache-ttl" &&
-    isCacheTtlEligibleProvider(attempt.provider, attempt.modelId, attempt.model.api)
-      ? resolveCacheTtlPruningSettings(contextPruning)
-      : undefined;
+      !isCacheTtlEligibleProvider(attempt.provider, attempt.modelId, attempt.model.api)
+      ? { ...contextPruning, mode: "size" }
+      : contextPruning,
+  );
   const previousCacheTtlTransform = activeSession.agent.transformContext;
-  let lastCacheTouchAt = cacheTtlSettings
-    ? readLastCacheTtlTimestamp(input.sessionManager, {
-        provider: attempt.provider,
-        modelId: attempt.modelId,
-      })
-    : null;
+  let lastCacheTouchAt =
+    cacheTtlSettings?.mode === "cache-ttl"
+      ? readLastCacheTtlTimestamp(input.sessionManager, {
+          provider: attempt.provider,
+          modelId: attempt.modelId,
+        })
+      : null;
   if (cacheTtlSettings) {
     activeSession.agent.transformContext = async (messages, signal) => {
       const transformed = previousCacheTtlTransform
