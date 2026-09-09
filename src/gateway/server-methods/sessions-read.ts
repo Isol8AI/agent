@@ -36,10 +36,7 @@ import {
 } from "../../routing/session-key.js";
 import { hasOperatorBoundary } from "../operator-role-policy.js";
 import { createAuthorizedSessionListEntryFilter } from "../session-list-access.js";
-import {
-  resolveRequestedSessionAgentId as resolveRequestedGlobalAgentId,
-  tryResolveSessionCompatibilityOwnerAgentId,
-} from "../session-request-agent.js";
+import { tryResolveSessionCompatibilityOwnerAgentId } from "../session-request-agent.js";
 import {
   canAccessIncognitoSession,
   gatewayClientSessionMemberIdentity,
