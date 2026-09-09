@@ -11,6 +11,7 @@ import {
   resolveAgentMainSessionKey,
 } from "../../config/sessions/main-session.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import { resolveSessionEntry } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import {
   sessionCreatorProfileId,
@@ -142,16 +143,23 @@ export function resolveSandboxRuntimeStatus(params: {
         { readOnly: true },
       )
     : undefined;
-  const sandboxRequired = session?.existing?.sandbox === "required";
+  const privateRoomPolicy = privateRoomPolicyForEntry(session?.existing);
+  const sandboxRequired = Boolean(privateRoomPolicy) || session?.existing?.sandbox === "required";
   const profileId = sessionCreatorProfileId(session?.existing?.createdActor)?.trim();
   const isolation: SandboxRuntimeIsolation = sandboxRequired
     ? {
         sandboxRequired: true,
-        createdActor: session.existing?.createdActor,
-        isolationSubject: profileId
-          ? { kind: "profile", profileId }
-          : { kind: "session", sessionKey: session.normalizedKey },
-        workspaceAccess: sandboxCfg.workspaceAccess === "rw" ? "ro" : sandboxCfg.workspaceAccess,
+        createdActor: session?.existing?.createdActor,
+        isolationSubject: privateRoomPolicy
+          ? { kind: "session", sessionKey: privateRoomPolicy.isolationSubject.sessionId }
+          : profileId
+            ? { kind: "profile", profileId }
+            : { kind: "session", sessionKey: session?.normalizedKey ?? comparableSessionKey },
+        workspaceAccess: privateRoomPolicy
+          ? "none"
+          : sandboxCfg.workspaceAccess === "rw"
+            ? "ro"
+            : sandboxCfg.workspaceAccess,
       }
     : { sandboxRequired: false };
   const sandboxed = classificationSessionKey

@@ -128,6 +128,12 @@ export const GatewayConfigSchema = z
         password: SecretInputSchema.optional().register(sensitive),
         allowTailscale: z.boolean().optional(),
         identityScopes: z.record(z.string().min(1), z.array(OperatorScopeSchema)).optional(),
+        trustedBrokerProfiles: z
+          .record(
+            z.string().regex(/^[a-f0-9]{64}$/u),
+            z.string().regex(/^(?!gateway-owner$)[A-Za-z0-9_-]{1,128}$/u),
+          )
+          .optional(),
         rateLimit: z
           .strictObject({
             maxAttempts: z.number().optional(),

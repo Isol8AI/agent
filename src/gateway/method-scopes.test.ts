@@ -70,6 +70,7 @@ describe("method scope resolution", () => {
     ["users.list", ["operator.read"]],
     ["users.self", ["operator.read"]],
     ["users.linkEmail", ["operator.admin"]],
+    ["users.ensureProfile", ["operator.admin"]],
     ["users.setDisplayName", ["operator.write"]],
     ["users.setAvatar", ["operator.write"]],
     ["tasks.get", ["operator.read"]],

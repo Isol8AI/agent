@@ -7,6 +7,7 @@ import {
   type SessionVisibility,
 } from "../../packages/gateway-protocol/src/index.js";
 import { GATEWAY_OWNER_PROFILE_ID } from "../../packages/gateway-protocol/src/schema/users.js";
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import {
   isSessionMember,
   type InternalSessionEntry,
@@ -68,10 +69,17 @@ export function hasSessionReadAccessChanged(
   );
 }
 
-export function isGatewayAdmin(client: Pick<GatewayClient, "connect"> | null): boolean {
+export function isGatewayAdmin(
+  client: Pick<GatewayClient, "connect" | "internal"> | null,
+): boolean {
   // Internal/plugin-runtime runs reach authorization with a client that has no
   // connect handshake; treat a connect-less client as a non-admin, never a crash.
-  return client?.connect?.scopes?.includes("operator.admin") === true;
+  // Trusted human brokers need this transport scope for file CAS, but their
+  // authenticated profile and typed room membership remain the room authority.
+  return (
+    client?.connect?.scopes?.includes("operator.admin") === true &&
+    client.internal?.trustedHumanBroker !== true
+  );
 }
 
 export function allowedSessionVisibilities(cfg: OpenClawConfig): SessionVisibility[] {
@@ -409,6 +417,15 @@ export function authorizeSessionAgentRun(params: {
     return agentError;
   }
   if (resolveSessionVisibility(params.target.entry) === "restricted") {
+    const execution = getPrivateRoomExecution();
+    if (
+      execution?.sessionKey === params.target.canonicalKey &&
+      execution.sessionId === params.target.entry.sessionId &&
+      execution.agentId === params.target.agentId
+    ) {
+      execution.assertCurrent();
+      return null;
+    }
     return errorShape(
       ErrorCodes.INVALID_REQUEST,
       "private room execution is unavailable until its isolation policy is active",

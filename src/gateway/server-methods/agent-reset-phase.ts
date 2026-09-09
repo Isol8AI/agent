@@ -7,6 +7,7 @@ import {
   errorShape,
   missingScopeErrorShape,
 } from "../../../packages/gateway-protocol/src/index.js";
+import { getPrivateRoomExecution } from "../../agents/private-room-execution.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
 import { assertPreparedSkillLibrarySelection } from "../../skills/library/selection.js";
@@ -69,6 +70,11 @@ export async function runAgentResetPhase(params: {
     effectiveTranscriptInputText: params.effectiveTranscriptInputText,
     message: params.message,
   };
+  // Authenticated room dispatch submits committed model input, never chat commands.
+  // Fence before reset matching, lifecycle callbacks, hooks, or session mutation.
+  if (getPrivateRoomExecution()) {
+    return { ...base, stop: false, accepted: false };
+  }
   const resetCommandMatch = params.message.match(AGENT_SESSION_RESET_COMMAND_RE);
   if (!resetCommandMatch || !params.requestedSessionKey) {
     return { ...base, stop: false, accepted: false };

@@ -46,7 +46,6 @@ import {
   refreshGatewayHealthSnapshot,
 } from "./server/health-state.js";
 import { broadcastPresenceSnapshot } from "./server/presence-events.js";
-import { createSessionViewerPresenceDeclarations } from "./session-viewer-presence.js";
 
 type GatewayRuntimePreparation = Awaited<ReturnType<typeof prepareGatewayKernelState>>;
 type GatewayLogger = ReturnType<typeof createSubsystemLogger>;
@@ -230,6 +229,11 @@ export async function prepareGatewayLifecycle(params: {
       resolveGatewayContext: runtime.resolvePluginGatewayContext,
     }),
     gatewayMethods: listActiveGatewayMethods(pluginRuntime.baseGatewayMethods),
+    clients,
+    broadcast,
+    incrementPresenceVersion,
+    getHealthVersion,
+    broadcastToConnIds,
   });
   const runtimeState = runtimeStateRef.current;
   const pluginRuntimeGeneration = createGatewayPluginRuntimeGeneration({
@@ -344,12 +348,6 @@ export async function prepareGatewayLifecycle(params: {
     isConnectionActive,
     canReadSession: runtime.canReadSession,
   });
-  runtimeState.sessionViewerPresence = createSessionViewerPresenceDeclarations({
-    clients,
-    broadcast,
-    incrementPresenceVersion,
-    getHealthVersion,
-  });
   deps.cron = runtimeState.cronState.cron;
   const pluginHostServices = {
     get cron() {
@@ -415,6 +413,7 @@ export async function prepareGatewayLifecycle(params: {
     void runtimeState.stopGatewayUpdateCheck().catch(() => {});
     void runtimeState.controlUiSessionPullRequests?.stop();
     runtimeState.sessionViewerPresence?.stop();
+    runtimeState.nativeRoomPresence?.stop();
     kernel.setDispatchReady(false);
     gatewayInstanceRuntimeRef.current?.close();
     cronReconciliation.invalidate();

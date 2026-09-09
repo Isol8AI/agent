@@ -23,7 +23,11 @@ export function verifyGatewayConnectDeviceProof(
     scopes: string[];
   },
 ):
-  | { ok: true; devicePublicKey: string | null; deviceAuthPayloadVersion: "v2" | "v3" | null }
+  | {
+      ok: true;
+      devicePublicKey: string | null;
+      deviceAuthPayloadVersion: "v2" | "v3" | "v4" | null;
+    }
   | { ok: false } {
   const { device, resolvedAuth, authMethod, role, scopes } = params;
   if (!device) {

@@ -40,6 +40,15 @@ export function persistSessionTranscriptArchive(
   }
   ensureSessionTranscriptArchiveSchema(database.db);
   const db = getSessionKysely(database.db);
+  const memoryRestricted =
+    executeSqliteQueryTakeFirstSync(
+      database.db,
+      db
+        .selectFrom("session_windows")
+        .select("memory_restricted")
+        .where("session_id", "=", plan.sessionId)
+        .where("session_key", "=", sessionKey),
+    )?.memory_restricted ?? null;
   executeSqliteQuerySync(
     database.db,
     db
@@ -57,6 +66,7 @@ export function persistSessionTranscriptArchive(
         reason: plan.reason,
         session_id: plan.sessionId,
         session_key: sessionKey,
+        memory_restricted: memoryRestricted,
       })
       .onConflict((conflict) => conflict.columns(["session_id", "generation"]).doNothing()),
   );
@@ -72,6 +82,7 @@ export function persistSessionTranscriptArchive(
         "encoding",
         "reason",
         "session_key",
+        "memory_restricted",
       ])
       .where("session_id", "=", plan.sessionId)
       .where("generation", "=", generation),
@@ -84,6 +95,7 @@ export function persistSessionTranscriptArchive(
     persisted.encoding !== archive.encoding ||
     persisted.reason !== plan.reason ||
     persisted.session_key !== sessionKey ||
+    persisted.memory_restricted !== memoryRestricted ||
     !Buffer.from(persisted.archive_blob).equals(Buffer.from(archive.bytes))
   ) {
     throw new Error(`Conflicting SQLite transcript archive for ${plan.sessionId}`);

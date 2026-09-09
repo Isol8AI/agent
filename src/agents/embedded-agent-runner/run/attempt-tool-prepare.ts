@@ -90,9 +90,9 @@ export function prepareEmbeddedAttemptToolBase(params: {
     toolsAllow: toolsAllowWithForcedRuntimeTools,
   });
   const {
-    codeModeControlsEnabled: codeModeControlsEnabledForRun,
+    codeModeControlsEnabled: requestedCodeModeControls,
     toolSearchConfig,
-    toolSearchControlsEnabled: toolSearchControlsEnabledForRun,
+    toolSearchControlsEnabled: requestedToolSearchControls,
     toolSearchRuntimeConfig,
   } = resolveAgentToolSurfacePlan({
     config: attempt.config,
@@ -109,6 +109,9 @@ export function prepareEmbeddedAttemptToolBase(params: {
     toolsAllow: attempt.toolsAllow,
     forceCodeModeControls: attempt.forceCodeModeTools,
   });
+  const privateRoom = params.setup.sandbox?.backendId === "private-room-files-v1";
+  const codeModeControlsEnabledForRun = !privateRoom && requestedCodeModeControls;
+  const toolSearchControlsEnabledForRun = !privateRoom && requestedToolSearchControls;
   if (isCodeModeDiagnosticEnabled()) {
     logCodeModeDiagnostic(log, "activation", {
       runId: attempt.runId,

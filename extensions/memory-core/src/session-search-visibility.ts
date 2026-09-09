@@ -25,6 +25,7 @@ import {
   normalizeOptionalLowercaseString as normalizeAgentIdForCompare,
   normalizeOptionalString,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRestrictedMemorySession } from "./private-room.js";
 import {
   readSessionArchiveReasonFromHitPath,
   readSessionResetRecallCutoffMetadata,
@@ -172,6 +173,15 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
   /** Trusted control-plane calls may authorize only hits already scoped to this agent. */
   trustedAgentScope?: boolean;
 }): Promise<MemorySearchResult[]> {
+  if (
+    isRestrictedMemorySession({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      sessionKey: params.requesterSessionKey,
+    })
+  ) {
+    return [];
+  }
   // Session visibility owns transcript hits only. Loading the catalog here for
   // memory-only results decodes every saved session prompt on the Gateway loop.
   if (!params.hits.some((hit) => hit.source === "sessions")) {
@@ -292,6 +302,9 @@ export async function filterMemorySearchHitsBySessionVisibility(params: {
   }
 
   const isSessionKeyAllowed = (key: string, allowAnchorTranscript = false): boolean => {
+    if (combinedSessionStore[key]?.visibility === "restricted") {
+      return false;
+    }
     if (!conversationRecall || !anchorSessionKey || !recallAgentId) {
       // A bare global key is local to the selected agent store. Reattach that
       // owner before applying visibility or non-default agents look cross-agent.

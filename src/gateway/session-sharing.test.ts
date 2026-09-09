@@ -335,6 +335,20 @@ describe("session sharing policy", () => {
       if (!restrictedTarget) {
         throw new Error("expected restricted target");
       }
+      const broker = roleClient("write", "restricted-broker");
+      broker.connect.scopes = ["operator.admin"];
+      broker.internal = { trustedHumanBroker: true };
+      const ordinaryAdmin = client({ scopes: ["operator.admin"] });
+      expect(
+        resolveSessionSharingRole({ cfg, client: ordinaryAdmin, target: restrictedTarget }),
+      ).toBe("admin");
+      expect(resolveSessionSharingRole({ cfg, client: broker, target: restrictedTarget })).toBe(
+        "viewer",
+      );
+      expect(createSessionListEntryFilter({ cfg, client: ordinaryAdmin })).toBeUndefined();
+      expect(
+        createSessionListEntryFilter({ cfg, client: broker })?.(sessionKey, restrictedTarget.entry),
+      ).toBe(false);
       expect(resolveSessionSharingRole({ cfg, client: writer, target: restrictedTarget })).toBe(
         "viewer",
       );
@@ -399,6 +413,19 @@ describe("session sharing policy", () => {
             : { details: { code: "SESSION_PARTICIPATION_REQUIRED" } },
         );
       }
+      for (const [method, requestParams] of [
+        ["chat.history", { sessionKey }],
+        ["sessions.search", { sessionKeys: [sessionKey] }],
+        ["sessions.message.append", { sessionKey }],
+        ["sessions.files.get", { sessionKey }],
+        ["sessions.files.set", { sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: broker, method, requestParams, context })
+            .error,
+          `trusted broker ${method}`,
+        ).not.toBeNull();
+      }
 
       addSessionMember(
         { agentId: "main", sessionKey },
@@ -411,6 +438,28 @@ describe("session sharing policy", () => {
       expect(resolveSessionSharingRole({ cfg, client: writer, target: restrictedTarget })).toBe(
         "member",
       );
+      addSessionMember(
+        { agentId: "main", sessionKey },
+        {
+          identity: { type: "profile", id: broker.authenticatedUserProfile!.profileId },
+          addedBy: owner.authenticatedUserProfile!.profileId,
+          expectedSessionId: "restricted-session",
+        },
+      );
+      expect(resolveSessionSharingRole({ cfg, client: broker, target: restrictedTarget })).toBe(
+        "member",
+      );
+      for (const [method, requestParams] of [
+        ["chat.history", { sessionKey }],
+        ["sessions.search", { sessionKeys: [sessionKey] }],
+        ["sessions.message.append", { sessionKey }],
+      ] as const) {
+        expect(
+          resolveSessionMutationAuthorization({ client: broker, method, requestParams, context })
+            .error,
+          `trusted broker member ${method}`,
+        ).toBeNull();
+      }
       for (const [method, requestParams] of [
         ["chat.history", { sessionKey }],
         ["board.get", { sessionKey }],
@@ -790,6 +839,8 @@ describe("session sharing policy", () => {
       const owner = client({ user: "owner@example.com" });
       const viewer = client({ user: "viewer@example.com" });
       const admin = client({ user: "admin@example.com", scopes: ["operator.admin"] });
+      const broker = client({ user: "broker@example.com", scopes: ["operator.admin"] });
+      broker.internal = { trustedHumanBroker: true };
       const solo = client({});
       const profiledSolo = client({ user: "gateway-owner" });
       const cfg = {};
@@ -809,6 +860,7 @@ describe("session sharing policy", () => {
         [profiledSolo, true],
         [owner, false],
         [viewer, false],
+        [broker, false],
       ] as const) {
         expect(isListed(requestClient, sessionKey, entry)).toBe(visible);
         expect(

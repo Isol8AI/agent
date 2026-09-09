@@ -22,6 +22,7 @@ import {
   type StoredSessionSuggestion,
 } from "../../config/sessions.js";
 import { presenceUserKey } from "../../shared/presence-user.js";
+import { prepareNativeRoomPresenceAuthority } from "../native-room-presence-authority.js";
 import { operatorSessionCap } from "../operator-role-policy.js";
 import { sessionObserverScopeKey } from "../session-observer-model.js";
 import { tryResolveSessionCompatibilityOwnerAgentId } from "../session-request-agent.js";
@@ -563,6 +564,19 @@ export const sessionSuggestionHandlers: GatewayRequestHandlers = {
     if (role === "viewer" && visibility !== "shared" && visibility !== "suggest") {
       respond(true, { ok: true, broadcast: false });
       return;
+    }
+    if (context.nativeRoomPresence && client?.connId) {
+      const prepared = prepareNativeRoomPresenceAuthority({
+        client,
+        getConfig: context.getRuntimeConfig,
+        sessionKey: target.canonicalKey,
+        agentId: target.agentId,
+      });
+      if (prepared) {
+        context.nativeRoomPresence.update(client.connId, prepared.roomKey, prepared.authority, {
+          typing: params.typing,
+        });
+      }
     }
     if (params.typing) {
       context.recordClientActivity?.(client);

@@ -13,7 +13,6 @@ import {
   listSessionEntries,
   listSessionTranscriptArchivesReadOnly,
   listSessionTranscriptInstances,
-  parseUsageCountedSessionIdFromFileName,
   readTranscriptContentRevisionSync,
   resolveSessionAgentId,
   resolveSessionTranscriptsDirForAgent,
@@ -357,14 +356,24 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     readOnly: options.readOnly === true,
     storePath,
   });
-  const retainedInstances = options.includeRetainedSqlite
-    ? listSessionTranscriptInstances({
-        agentId: normalizedAgentId,
-        hydrateSkillPromptRefs: false,
-        readConsistency: "latest",
-        storePath,
-      })
-    : [];
+  // Durable window privacy fences retained content independently from the current logical row.
+  const retainedInstances = listSessionTranscriptInstances({
+    agentId: normalizedAgentId,
+    hydrateSkillPromptRefs: false,
+    readConsistency: "latest",
+    storePath,
+  });
+  const privateSessionIds = new Set([
+    ...sessionEntries
+      .filter(({ entry }) => entry.visibility === "restricted")
+      .map(({ entry }) => entry.sessionId),
+    ...retainedInstances
+      .filter(
+        ({ entry, memoryRestricted }) =>
+          entry.visibility === "restricted" || memoryRestricted !== false,
+      )
+      .map(({ sessionId }) => sessionId),
+  ]);
   const artifactPaths: string[] = [];
   const scannedArtifactPaths = new Set<string>();
   for (const artifactDir of artifactDirsByPath.values()) {
@@ -388,6 +397,9 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
     ...sessionEntries,
   ]);
   for (const summary of sessionEntries) {
+    if (privateSessionIds.has(summary.entry.sessionId)) {
+      continue;
+    }
     const sessionKey = isSharedFixedStore
       ? summary.sessionKey
       : canonicalizeMainSessionAlias({
@@ -415,10 +427,12 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
       activeEntriesBySessionId.set(entry.sessionId, entry);
     }
   }
-  const includeUnownedArtifacts = !isSharedFixedStore;
   const corpusEntries = [...activeEntriesBySessionId.values()];
   if (options.includeRetainedSqlite) {
     for (const instance of retainedInstances) {
+      if (privateSessionIds.has(instance.sessionId)) {
+        continue;
+      }
       if (activeEntriesBySessionId.has(instance.sessionId)) {
         continue;
       }
@@ -453,17 +467,18 @@ export function listSessionTranscriptCorpusEntriesForAgentSync(
   for (const artifactPath of artifactPaths) {
     const artifactName = path.basename(artifactPath);
     const archivedIdentity = archivedIdentitiesByName.get(artifactName);
-    const primarySessionId =
-      archivedIdentity?.sessionId ?? parseUsageCountedSessionIdFromFileName(artifactName);
-    if (!primarySessionId) {
+    // Names and live rows cannot prove an archive's privacy after its owner is deleted.
+    // Unregistered legacy files and unknown legacy rows are both excluded.
+    if (!archivedIdentity || archivedIdentity.memoryRestricted !== 0) {
+      continue;
+    }
+    const primarySessionId = archivedIdentity.sessionId;
+    if (!primarySessionId || privateSessionIds.has(primarySessionId)) {
       continue;
     }
     const primaryEntry = activeEntriesBySessionId.get(primarySessionId);
     const primaryOwner = entryOwnersBySessionId.get(primarySessionId);
     if (primaryOwner && primaryOwner !== normalizedAgentId) {
-      continue;
-    }
-    if (!primaryOwner && !archivedIdentity && !includeUnownedArtifacts) {
       continue;
     }
     corpusEntries.push({

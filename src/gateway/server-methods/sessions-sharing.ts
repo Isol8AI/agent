@@ -31,6 +31,7 @@ import {
 } from "../control-ui-public-session-token.js";
 import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
 import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
+import { revokePrivateRoomExecutions } from "../private-room-executions.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import {
   isKnownSessionMemberIdentity,
@@ -182,6 +183,8 @@ function publishSharingChange(params: {
 }): void {
   bumpGatewayAccessRevision();
   invalidateSessionSharingSnapshot(params.event.sessionKey);
+  params.context.nativeRoomPresence?.revalidate();
+  revokePrivateRoomExecutions();
   const eventOptions = {
     sessionKeys: [params.event.sessionKey],
   };

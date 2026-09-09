@@ -159,6 +159,11 @@ export function assertGatewayAuthConfigured(
   auth: ResolvedGatewayAuth,
   rawAuthConfig?: GatewayAuthConfig | null,
 ): void {
+  if (Object.keys(rawAuthConfig?.trustedBrokerProfiles ?? {}).length > 0 && auth.mode !== "token") {
+    throw new Error(
+      "gateway.auth.trustedBrokerProfiles requires gateway.auth.mode to resolve to token",
+    );
+  }
   if (auth.mode === "token" && isInvalidGatewayToken(auth.token)) {
     throw new Error(
       "Gateway token must not be blank or the literal string undefined/null. Run `openclaw doctor --fix --generate-gateway-token` for an inline token, or rotate its external secret source.",

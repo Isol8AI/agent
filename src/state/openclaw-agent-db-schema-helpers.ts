@@ -91,6 +91,8 @@ const AGENT_SCHEMA_COMPATIBILITY = {
     ...STANDING_INTENTS_FTS_SHADOW_TABLES,
   ],
   allowedMissingColumns: [
+    "session_windows.memory_restricted",
+    "session_transcript_archives.memory_restricted",
     "session_pending_inputs.consumed_event_id",
     "session_transcript_active_events.context_eligible",
     "session_conversations.route_context_json",

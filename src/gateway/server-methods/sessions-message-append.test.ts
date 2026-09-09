@@ -5,6 +5,10 @@ import {
   type SessionMemberIdentity,
   type SessionMessageAppendResult,
 } from "../../../packages/gateway-protocol/src/index.js";
+import {
+  bindPrivateRoomRun,
+  withPrivateRoomExecution,
+} from "../../agents/private-room-execution.js";
 import { readTranscriptSenderIdentity } from "../../chat/sender-identity.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import {
@@ -117,8 +121,22 @@ function receipt(result: Awaited<ReturnType<typeof invoke>>): SessionMessageAppe
 
 function agentClient(): GatewayClient {
   const operationalRunInstance = { instanceId: "execution-1", runId: "run-1" };
-  registerAgentRunContext("run-1", { agentId: "helper", sessionKey: "agent:helper:work" });
+  registerAgentRunContext("run-1", { agentId: "helper", sessionKey: scope.sessionKey });
   const delegatedAuthority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+  withPrivateRoomExecution(
+    {
+      agentId: "helper",
+      rootExecutionId: "root-execution-1",
+      runId: "run-1",
+      hopCount: 0,
+      sessionKey: scope.sessionKey,
+      sessionId: scope.sessionId,
+      inputMessageId: "input-1",
+      assertCurrent: () => {},
+      close: () => {},
+    },
+    () => bindPrivateRoomRun(operationalRunInstance),
+  );
   return {
     ...soloClient(),
     internal: {
@@ -126,7 +144,7 @@ function agentClient(): GatewayClient {
       agentRuntimeIdentity: {
         kind: "agentRuntime",
         agentId: "helper",
-        sessionKey: "agent:helper:work",
+        sessionKey: scope.sessionKey,
         operationalRunInstance,
         delegatedAuthority: { kind: "local", ...delegatedAuthority },
       },
@@ -263,6 +281,17 @@ describe("sessions.message.append", () => {
       const pending = invoke();
       removeSessionMember(scope, { type: "profile", id: "member" }, undefined, scope.sessionId);
       expect((await pending)[0]).toBe(false);
+      addSessionMember(scope, {
+        identity: { type: "profile", id: "member" },
+        addedBy: "owner",
+        expectedSessionId: scope.sessionId,
+      });
+      const broker = identifiedClient("member");
+      broker.connect.scopes = ["operator.admin"];
+      broker.internal = { trustedHumanBroker: true };
+      const pendingBroker = invoke({ idempotencyKey: "broker-contribution" }, broker);
+      removeSessionMember(scope, { type: "profile", id: "member" }, undefined, scope.sessionId);
+      expect((await pendingBroker)[0]).toBe(false);
       expect(loadTranscriptEventsSync(scope).filter(readTranscriptEventMessage)).toEqual([]);
       expect(listSessionParticipantsReadOnly(scope).size).toBe(0);
       await upsertSessionEntryCore(scope, { sessionId: "replacement", updatedAt: 2 });

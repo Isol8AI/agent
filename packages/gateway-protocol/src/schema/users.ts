@@ -73,6 +73,15 @@ export const UsersListResultSchema = closedObject({ profiles: Type.Array(UserPro
 export const UsersSelfParamsSchema = closedObject({});
 export const UsersSelfResultSchema = closedObject({ profile: UserProfileSchema });
 
+export const UsersEnsureProfileParamsSchema = closedObject({
+  alias: Type.String({
+    minLength: 97,
+    maxLength: 97,
+    pattern: "^clerk-[a-f0-9]{64}@identity\\.lightbulb\\.invalid$",
+  }),
+});
+export const UsersEnsureProfileResultSchema = closedObject({ profile: UserProfileSchema });
+
 export const UsersLinkEmailParamsSchema = closedObject({
   email: Type.String({ minLength: 1, maxLength: 320 }),
   targetProfileId: UserProfileIdSchema,
@@ -274,6 +283,8 @@ export type UsersListParams = Static<typeof UsersListParamsSchema>;
 export type UsersListResult = Static<typeof UsersListResultSchema>;
 export type UsersSelfParams = Static<typeof UsersSelfParamsSchema>;
 export type UsersSelfResult = Static<typeof UsersSelfResultSchema>;
+export type UsersEnsureProfileParams = Static<typeof UsersEnsureProfileParamsSchema>;
+export type UsersEnsureProfileResult = Static<typeof UsersEnsureProfileResultSchema>;
 export type UsersLinkEmailParams = Static<typeof UsersLinkEmailParamsSchema>;
 export type UsersLinkEmailResult = Static<typeof UsersLinkEmailResultSchema>;
 export type UsersSetDisplayNameParams = Static<typeof UsersSetDisplayNameParamsSchema>;

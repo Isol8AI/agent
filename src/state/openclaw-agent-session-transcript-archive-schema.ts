@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.js";
+import { ensureSessionMemoryPrivacyColumns } from "./openclaw-agent-db-session-migrations.js";
 import { OPENCLAW_AGENT_SCHEMA_SQL } from "./openclaw-agent-schema.js";
 
 export const SESSION_TRANSCRIPT_ARCHIVES_TABLE = "session_transcript_archives";
@@ -24,6 +25,7 @@ export function ensureSessionTranscriptArchiveSchema(db: DatabaseSync): void {
   }
   const ensure = () => {
     db.exec(sessionTranscriptArchiveSchemaSql()); // sqlite-allow-raw -- Canonical additive DDL only.
+    ensureSessionMemoryPrivacyColumns(db);
   };
   if (db.isTransaction) {
     ensure();

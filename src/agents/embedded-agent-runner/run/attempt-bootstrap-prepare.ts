@@ -13,6 +13,7 @@ import {
   isPrimaryBootstrapRun,
   resolveWorkspaceBootstrapRouting,
 } from "../../bootstrap-routing.js";
+import { getPrivateRoomExecution } from "../../private-room-execution.js";
 import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
@@ -40,7 +41,9 @@ export async function prepareEmbeddedAttemptBootstrap(params: {
       ? params.setup.effectiveWorkspace
       : bootstrapWorkspaceDir;
   const suppressAmbientContext =
-    params.isRawModelRun || attempt.operation === "settled-tool-finalization";
+    Boolean(getPrivateRoomExecution()) ||
+    params.isRawModelRun ||
+    attempt.operation === "settled-tool-finalization";
   const contextInjectionMode = resolveContextInjectionMode(
     attempt.config,
     params.setup.sessionAgentId,

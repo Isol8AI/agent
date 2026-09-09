@@ -1,8 +1,10 @@
 // Gateway methods for durable user profile administration.
 import {
   ErrorCodes,
+  GATEWAY_OWNER_PROFILE_ID,
   GatewayErrorDetailCodes,
   errorShape,
+  validateUsersEnsureProfileParams,
   validateUsersLinkEmailParams,
   validateUsersListParams,
   validateUsersPrefsGetParams,
@@ -18,6 +20,7 @@ import { UserProfileOwnerError } from "../../state/user-profiles-schema.js";
 import {
   getUserProfileDisplay,
   getUserProfileListItem,
+  ensureProfileForEmail,
   linkEmail,
   listProfiles,
   resolveUserProfileId,
@@ -107,6 +110,31 @@ export const usersHandlers: GatewayRequestHandlers = {
         return;
       }
       respond(true, { profile: getUserProfileListItem(profileId) });
+    } catch (error) {
+      respond(false, undefined, profileError(error));
+    }
+  },
+  "users.ensureProfile": ({ params, respond }) => {
+    if (
+      !assertValidParams(params, validateUsersEnsureProfileParams, "users.ensureProfile", respond)
+    ) {
+      return;
+    }
+    try {
+      const ensured = ensureProfileForEmail(params.alias);
+      const profile = getUserProfileListItem(ensured.id);
+      if (profile.id === GATEWAY_OWNER_PROFILE_ID) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            "trusted broker identity alias must not resolve to the shared owner profile",
+          ),
+        );
+        return;
+      }
+      respond(true, { profile });
     } catch (error) {
       respond(false, undefined, profileError(error));
     }

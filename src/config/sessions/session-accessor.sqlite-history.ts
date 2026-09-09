@@ -1,6 +1,7 @@
 import { executeSqliteQuerySync } from "../../infra/kysely-sync.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { withOpenClawAgentDatabaseReadOnly } from "../../state/openclaw-agent-db-readonly.js";
+import { readSqliteTableColumns } from "../../state/openclaw-agent-db-session-migrations.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { isInternalSessionEffectsKey } from "./internal-session-key.js";
 import type {
@@ -38,7 +39,13 @@ export function listTranscriptInstancesFromDatabase(params: {
       "parent_session_key",
       "spawned_by",
       "chat_type",
-    ]);
+    ])
+    .select((expression) =>
+      (readSqliteTableColumns(params.database.db, "session_windows")?.has("memory_restricted")
+        ? expression.ref("memory_restricted")
+        : expression.val<number | null>(null)
+      ).as("memory_restricted"),
+    );
   if (!params.options.includeAllWindows) {
     query = query.where("transcript_updated_at", "is not", null);
   }
@@ -88,6 +95,7 @@ export function listTranscriptInstancesFromDatabase(params: {
         acpOwned: row.acp_owned === 1 || Boolean(currentIsExact && current?.acp),
         entry,
         provenanceKnown,
+        memoryRestricted: row.memory_restricted !== 0,
         sessionId: row.session_id,
         sessionKey: row.session_key,
         updatedAtMs,
@@ -125,6 +133,12 @@ export function listSessionTranscriptArchivesReadOnly(
         "session_key as sessionKey",
         "created_at as createdAt",
       ])
+      .select((expression) =>
+        (readSqliteTableColumns(db, "session_transcript_archives")?.has("memory_restricted")
+          ? expression.ref("memory_restricted")
+          : expression.val<number | null>(null)
+        ).as("memoryRestricted"),
+      )
       .orderBy("created_at")
       .orderBy("session_id");
     query = query.where((expression) =>

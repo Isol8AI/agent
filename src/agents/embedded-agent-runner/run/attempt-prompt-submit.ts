@@ -5,6 +5,7 @@
 import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
 import type { ImageContent } from "../../../llm/types.js";
 import type { createTrajectoryRuntimeRecorder } from "../../../trajectory/runtime.js";
+import { getPrivateRoomExecution } from "../../private-room-execution.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import { agentSessionQueuePromptContext } from "../../sessions/agent-session-prompting.js";
 import {
@@ -179,6 +180,8 @@ export async function submitEmbeddedAttemptPrompt(input: {
     }
   };
   const promptOptions = {
+    // Committed room text cannot invoke extension commands or expand skills/templates.
+    ...(getPrivateRoomExecution() ? { expandPromptTemplates: false } : {}),
     ...(!input.runtimeOnly && input.images.length > 0 ? { images: input.images } : {}),
     ...(persistedUserIdempotencyKey ? { persistedUserIdempotencyKey } : {}),
     preflightResult: armModelPromptTransform,

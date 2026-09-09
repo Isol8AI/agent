@@ -10,6 +10,7 @@ import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-tr
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
 import { prepareSystemAgentRunAdmission } from "../../admitted-run-context.js";
 import { readBtwTranscriptMessages } from "../../btw-transcript.js";
+import { withPrivateRoomExecution } from "../../private-room-execution.js";
 import type { AgentMessage } from "../../runtime/index.js";
 import {
   createAssistant,
@@ -116,6 +117,59 @@ afterEach(() => {
 });
 
 describe("submitEmbeddedAttemptPrompt", () => {
+  it("sends private /reset to the model without executing a registered command", async () => {
+    const resourceLoader = createResourceLoader(new Map([["input", []]]));
+    const extension = resourceLoader.getExtensions().extensions[0]!;
+    const resetCommand = vi.fn(async () => {});
+    extension.commands.set("reset", {
+      name: "reset",
+      sourceInfo: extension.sourceInfo,
+      handler: resetCommand,
+    });
+    const requests: Context["messages"][] = [];
+    streamMocks.streamSimple.mockImplementation((model, context) => {
+      requests.push(structuredClone(context.messages));
+      return createAssistantResultStream(
+        createAssistant(model, [{ type: "text", text: "Literal input received" }]),
+      );
+    });
+    const { session } = await createTestSession({ resourceLoader });
+    const submit = () =>
+      submitEmbeddedAttemptPrompt({
+        ...createBaseInput(),
+        activeSession: session,
+        transcriptPrompt: "/reset",
+        modelPrompt: "/reset",
+        prependContext: undefined,
+        appendContext: undefined,
+        promptActiveSession: (prompt, options) => session.prompt(prompt, options),
+      });
+    await withPrivateRoomExecution(
+      {
+        agentId: "main",
+        rootExecutionId: "root",
+        runId: "run",
+        hopCount: 0,
+        sessionKey: "agent:main:room",
+        sessionId,
+        inputMessageId: "committed-input",
+        assertCurrent: () => {},
+        close: () => {},
+      },
+      submit,
+    );
+    expect(resetCommand).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toContainEqual(
+      expect.objectContaining({ role: "user", content: [{ type: "text", text: "/reset" }] }),
+    );
+    expect(session.getLastAssistantText()).toBe("Literal input received");
+
+    await submit();
+    expect(resetCommand).toHaveBeenCalledOnce();
+    expect(requests).toHaveLength(1);
+  });
+
   it("replaces queued context without charging it twice or changing user overlap credit", () => {
     const user = {
       role: "user" as const,

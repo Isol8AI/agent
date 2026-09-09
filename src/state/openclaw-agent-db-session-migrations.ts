@@ -282,14 +282,63 @@ export function readSqliteTableColumns(db: DatabaseSync, tableName: string): Set
   if (!table) {
     return null;
   }
+  // SAFETY: SQLite PRAGMA table_info rows expose the selected table's name column.
   const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
     name?: unknown;
   }>;
   return new Set(rows.flatMap((row) => (typeof row.name === "string" ? [row.name] : [])));
 }
 
+/** Preserve memory exclusion independently from deletable logical session metadata. */
+export function ensureSessionMemoryPrivacyColumns(db: DatabaseSync): void {
+  const windows = readSqliteTableColumns(db, "session_windows");
+  if (windows && !windows.has("memory_restricted")) {
+    // NULL is unknown, not permission to index an older retained transcript.
+    db.exec("ALTER TABLE session_windows ADD COLUMN memory_restricted INTEGER;");
+    // SAFETY: The fixed SELECT aliases exactly match the row shape consumed below.
+    const rows = db
+      .prepare(`
+      SELECT n.current_session_id, n.entry_json, n.session_key, n.updated_at
+      FROM session_nodes n JOIN session_windows w
+        ON w.session_key = n.session_key AND w.session_id = n.current_session_id
+    `)
+      .all() as Array<{
+      current_session_id: string;
+      entry_json: string;
+      session_key: string;
+      updated_at: number;
+    }>;
+    const update = db.prepare(
+      "UPDATE session_windows SET memory_restricted = ? WHERE session_id = ? AND session_key = ?",
+    );
+    for (const row of rows) {
+      const entry = parseSqliteSessionEntryRecord(row);
+      if (entry) {
+        update.run(
+          entry.visibility === "restricted" || entry.privateRoomExecutionPolicy ? 1 : 0,
+          row.current_session_id,
+          row.session_key,
+        );
+      }
+    }
+  }
+  const archives = readSqliteTableColumns(db, "session_transcript_archives");
+  if (archives && !archives.has("memory_restricted")) {
+    db.exec("ALTER TABLE session_transcript_archives ADD COLUMN memory_restricted INTEGER;");
+    if (windows) {
+      // Only exact retained identities can classify legacy archives. Deleted owners stay unknown.
+      db.exec(`UPDATE session_transcript_archives SET memory_restricted = (
+        SELECT w.memory_restricted FROM session_windows w
+        WHERE w.session_id = session_transcript_archives.session_id
+          AND w.session_key = session_transcript_archives.session_key
+      );`);
+    }
+  }
+}
+
 /** Installs same-version session projections on first updated-binary open. */
 export function ensureSessionAdditiveColumns(db: DatabaseSync): void {
+  ensureSessionMemoryPrivacyColumns(db);
   ensurePendingInputConsumptionColumn(db);
   if (hasPendingSessionTranscriptContextEligibilityColumn(db)) {
     // NULL records an older writer's unclassified projection; the transcript

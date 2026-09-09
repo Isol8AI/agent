@@ -12,6 +12,7 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core-host-runtime-core";
 import type { OpenClawPluginToolContext } from "openclaw/plugin-sdk/plugin-entry";
+import { isRestrictedMemorySession } from "./private-room.js";
 import { filterMemorySearchHitsBySessionVisibility } from "./session-search-visibility.js";
 import { buildMemorySearchUnavailableResult } from "./tools.shared.js";
 
@@ -82,6 +83,9 @@ export async function executeMemorySearchToolQuery(params: {
   let active = params.initialManager;
   let partialGeneration = 0;
   const { query, signal, visibility } = params;
+  if (isRestrictedMemorySession({ ...visibility, sessionKey: query.sessionKey })) {
+    throw new Error("Global memory is unavailable in private rooms");
+  }
   // Product recall may index transcripts without adding them to ordinary model search.
   // Explicit corpus selection is authorized by the tool owner before this point.
   const searchSources =

@@ -1,4 +1,3 @@
-// Gateway methods expose session files and workspace browsing.
 import { asOptionalObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
@@ -11,6 +10,8 @@ import {
   validateSessionsFilesListParams,
   validateSessionsFilesSetParams,
 } from "../../../packages/gateway-protocol/src/index.js";
+// Gateway methods expose session files and workspace browsing.
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../../routing/session-key.js";
@@ -258,6 +259,19 @@ function loadSessionFileRoot(params: { sessionKey: string; agentId?: string }) {
       params.agentId ??
       parseAgentSessionKey(params.sessionKey)?.agentId,
   );
+  const privatePolicy = privateRoomPolicyForEntry(loaded.entry);
+  if (privatePolicy) {
+    if (loaded.entry.repositoryWorkspaceId) {
+      throw new Error("Private room policy cannot expose a repository workspace");
+    }
+    return {
+      ...loaded,
+      agentId,
+      root: privatePolicy.sessionRoot,
+      fileRoot: privatePolicy.sessionRoot,
+      diffCwd: privatePolicy.sessionRoot,
+    };
+  }
   if (loaded.entry.repositoryWorkspaceId) {
     return { ...loaded, agentId, root: undefined, fileRoot: undefined, diffCwd: undefined };
   }
@@ -384,7 +398,7 @@ function requireSessionFilesAgentId(params: {
 
 /** Gateway handlers for session files and workspace browsing. */
 export const sessionsFilesHandlers: GatewayRequestHandlers = {
-  "sessions.files.list": async ({ params, respond, context }) => {
+  "sessions.files.list": async ({ params, respond, context, sessionMutationAuthorization }) => {
     if (
       !assertValidParams(params, validateSessionsFilesListParams, "sessions.files.list", respond)
     ) {
@@ -407,13 +421,14 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
         : loaded.repository
           ? await loaded.repository.inspect("list", request)
           : await listSessionWorkspaceFiles({ ...loaded, ...request });
+    sessionMutationAuthorization?.assertCurrent();
     respond(true, {
       sessionKey: params.sessionKey,
       ...result,
       ...(loaded.repository ? { root: undefined } : {}),
     });
   },
-  "sessions.files.get": async ({ params, respond, context }) => {
+  "sessions.files.get": async ({ params, respond, context, sessionMutationAuthorization }) => {
     if (!assertValidParams(params, validateSessionsFilesGetParams, "sessions.files.get", respond)) {
       return;
     }
@@ -434,6 +449,7 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
         : loaded.repository
           ? await loaded.repository.inspect("get", request)
           : await getSessionWorkspaceFile({ ...loaded, ...request });
+    sessionMutationAuthorization?.assertCurrent();
     if (!result.file || result.file.missing) {
       respondSessionFileNotFound(respond, params.path);
       return;
@@ -520,7 +536,7 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
       file: update.file,
     });
   },
-  "sessions.files.reveal": async ({ params, respond, context }) => {
+  "sessions.files.reveal": async ({ params, respond, context, sessionMutationAuthorization }) => {
     if (
       !assertValidParams(
         params,
@@ -578,6 +594,7 @@ export const sessionsFilesHandlers: GatewayRequestHandlers = {
       });
       return;
     }
+    sessionMutationAuthorization?.assertCurrent();
     const command = resolveOpenPathCommand(workspaceRoot);
     try {
       await execOpenPath(command);

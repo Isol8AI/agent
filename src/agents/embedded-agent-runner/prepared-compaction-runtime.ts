@@ -44,6 +44,7 @@ import {
   resolveModelAuthMode,
 } from "../model-auth.js";
 import { supportsModelTools } from "../model-tool-support.js";
+import { getPrivateRoomExecution } from "../private-room-execution.js";
 import { resolveAgentPromptSurfaceForSessionKey } from "../prompt-surface.js";
 import { collectRuntimeChannelCapabilities } from "../runtime-capabilities.js";
 import {
@@ -161,7 +162,7 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
     const resolvedMessageProvider = params.messageChannel ?? params.messageProvider;
     const contextInjectionMode = resolveContextInjectionMode(params.config, sessionAgentId);
     const { contextFiles } =
-      contextInjectionMode === "never"
+      getPrivateRoomExecution() || contextInjectionMode === "never"
         ? { contextFiles: [] }
         : await resolveBootstrapContextForRun({
             workspaceDir: effectiveWorkspace,
@@ -335,23 +336,25 @@ export async function buildPreparedCompactionRuntime(prepared: DirectCompactionP
       [...normalizableToolProjection.tools],
       runtimePlanModelContext,
     );
-    bundleMcpRuntime = toolsEnabled
-      ? await createBundleMcpToolRuntime({
-          workspaceDir: effectiveWorkspace,
-          cfg: params.config,
-          reservedToolNames: tools.map((tool) => tool.name),
-        })
-      : undefined;
-    bundleLspRuntime = toolsEnabled
-      ? await createBundleLspToolRuntime({
-          workspaceDir: effectiveWorkspace,
-          cfg: params.config,
-          reservedToolNames: [
-            ...tools.map((tool) => tool.name),
-            ...(bundleMcpRuntime?.tools.map((tool) => tool.name) ?? []),
-          ],
-        })
-      : undefined;
+    bundleMcpRuntime =
+      toolsEnabled && !getPrivateRoomExecution()
+        ? await createBundleMcpToolRuntime({
+            workspaceDir: effectiveWorkspace,
+            cfg: params.config,
+            reservedToolNames: tools.map((tool) => tool.name),
+          })
+        : undefined;
+    bundleLspRuntime =
+      toolsEnabled && !getPrivateRoomExecution()
+        ? await createBundleLspToolRuntime({
+            workspaceDir: effectiveWorkspace,
+            cfg: params.config,
+            reservedToolNames: [
+              ...tools.map((tool) => tool.name),
+              ...(bundleMcpRuntime?.tools.map((tool) => tool.name) ?? []),
+            ],
+          })
+        : undefined;
     const filteredBundledTools = applyFinalEffectiveToolPolicy({
       bundledTools: [...(bundleMcpRuntime?.tools ?? []), ...(bundleLspRuntime?.tools ?? [])],
       config: params.config,

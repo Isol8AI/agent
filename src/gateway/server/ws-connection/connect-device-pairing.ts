@@ -90,6 +90,7 @@ export async function authorizeGatewayConnectDevice(
     hasRequestedScopes,
     skipLocalBackendSelfPairing,
     controlUiPairingKind,
+    trustedBrokerProfileId,
   } = state;
   const isConnectAuthorizationCurrent = () =>
     resolveGatewayConnectPolicyFailure(context, state) === undefined;
@@ -164,6 +165,16 @@ export async function authorizeGatewayConnectDevice(
       reason: ConnectPairingRequiredReason,
       existingPairedDevice: Awaited<ReturnType<typeof getPairedDevice>> | null = null,
     ) => {
+      if (trustedBrokerProfileId) {
+        failPairingHandshake({
+          message: "trusted broker profile requires an existing paired device",
+          closeCause: {
+            cause: "trusted-broker-device-not-paired",
+            meta: { deviceId: device.id, reason },
+          },
+        });
+        return false;
+      }
       const pairingStateAllowsRequestedAccess = (
         pairedCandidate: Awaited<ReturnType<typeof getPairedDevice>>,
         requestedScopes = scopes,
@@ -547,10 +558,35 @@ export async function authorizeGatewayConnectDevice(
     return undefined;
   }
 
+  if (trustedBrokerProfileId && device && devicePublicKey) {
+    // Re-read immediately before admission so removal, key replacement, role
+    // revocation, or scope reduction during earlier awaits fails closed.
+    const livePaired = await getPairedDevice(device.id);
+    const livePairingAuthorizesSession = livePaired
+      ? livePaired.publicKey === devicePublicKey &&
+        hasEffectivePairedDeviceRole(livePaired, role) &&
+        roleScopesAllow({
+          role,
+          requestedScopes: scopes,
+          allowedScopes: resolvePairedAccessScopes(livePaired),
+        })
+      : false;
+    if (!livePairingAuthorizesSession) {
+      failPairingHandshake({
+        message: "trusted broker profile requires an existing paired device",
+        closeCause: {
+          cause: "trusted-broker-device-not-paired",
+          meta: { deviceId: device.id, reason: "pairing-changed" },
+        },
+      });
+      return undefined;
+    }
+  }
+
   // Device tokens do not carry profile identity and existing broader grants may be reused.
   // Team-role operators must reauthenticate as their verified person on every connection.
   const { deviceToken, bootstrapDeviceTokens } =
-    roleConfiguredHumanOperator && authResult.user?.trim()
+    trustedBrokerProfileId || (roleConfiguredHumanOperator && authResult.user?.trim())
       ? { deviceToken: null, bootstrapDeviceTokens: [] }
       : await issueGatewayConnectDeviceTokens({
           state: { ...state, scopes, handoffBootstrapProfile },

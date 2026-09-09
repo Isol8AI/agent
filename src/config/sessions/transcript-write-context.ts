@@ -2,6 +2,7 @@
 // through nested session-manager callbacks.
 import { AsyncLocalStorage } from "node:async_hooks";
 import path from "node:path";
+import { assertPrivateRoomExecutionTarget } from "../../agents/private-room-execution.js";
 import { runWithCliHistoryWriter } from "./cli-history-boundary.js";
 import type { TranscriptAppendRefusal } from "./session-accessor.sqlite-contract.js";
 
@@ -212,6 +213,7 @@ function assertTranscriptWriteContext(
 
 /** A guarded context cannot silently become an unfenced write to another target. */
 export function assertOwnedTranscriptWriteCommit(scope: SessionTranscriptWriteTarget): void {
+  assertPrivateRoomExecutionTarget(scope);
   assertTranscriptWriteContext(ownedTranscriptWriteContext.getStore(), scope);
 }
 

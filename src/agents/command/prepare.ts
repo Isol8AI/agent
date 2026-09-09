@@ -8,6 +8,7 @@ import {
   normalizeVerboseLevel,
 } from "../../auto-reply/thinking.js";
 import { formatCliCommand } from "../../cli/command-format.js";
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import type { InternalSessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveAgentExplicitRecipientSession } from "../../infra/outbound/agent-delivery.js";
@@ -44,6 +45,10 @@ import { AGENT_LANE_SUBAGENT } from "../lanes.js";
 import type { ModelManifestNormalizationContext } from "../model-ref-shared.js";
 import { buildConfiguredModelCatalog, resolveConfiguredModelRef } from "../model-selection.js";
 import type { PreparedModelRuntimePluginGeneration } from "../prepared-model-runtime.types.js";
+import {
+  assertPrivateRoomExecutionTarget,
+  getPrivateRoomExecution,
+} from "../private-room-execution.js";
 import { normalizeSpawnedRunMetadata } from "../spawned-context.js";
 import { resolveEffectiveAgentRuntime } from "../thinking-runtime.js";
 import { resolveAgentTimeoutMs } from "../timeout.js";
@@ -265,8 +270,17 @@ export async function prepareAgentCommandExecution(
     agentId: sessionAgentId,
     sessionKey,
   });
+  const privatePolicy = privateRoomPolicyForEntry(sessionEntryRaw);
   const workspaceDirRaw =
-    normalizedSpawned.workspaceDir ?? resolveAgentWorkspaceDir(cfg, sessionAgentId);
+    privatePolicy?.sessionRoot ??
+    normalizedSpawned.workspaceDir ??
+    resolveAgentWorkspaceDir(cfg, sessionAgentId);
+  if (privatePolicy) {
+    if (!getPrivateRoomExecution()) {
+      throw new Error("Private room requires authenticated execution dispatch");
+    }
+    assertPrivateRoomExecutionTarget({ sessionKey, sessionId });
+  }
   const workspaceDir = resolveUserPath(workspaceDirRaw);
   const { getAcpSessionManager } = await loadAcpManagerRuntime();
   const acpManager = getAcpSessionManager();
@@ -278,6 +292,7 @@ export async function prepareAgentCommandExecution(
   // fallback applies only to ordinary sessions and never bridges into a node.
   const isAcpPlacedSession = acpResolution !== null && acpResolution.kind !== "none";
   const cwd =
+    privatePolicy?.sessionRoot ??
     normalizeOptionalString(opts.cwd) ??
     normalizeOptionalString(sessionEntryRaw?.spawnedCwd) ??
     (isAcpPlacedSession ? undefined : resolveAgentRunCwd(cfg, sessionAgentId));
@@ -367,7 +382,7 @@ export async function prepareAgentCommandExecution(
     });
     await ensureAgentWorkspace({
       dir: workspaceDirRaw,
-      ensureBootstrapFiles: !agentCfg?.skipBootstrap,
+      ensureBootstrapFiles: !privatePolicy && !agentCfg?.skipBootstrap,
       skipOptionalBootstrapFiles: agentCfg?.skipOptionalBootstrapFiles,
       provisioning: workspaceProvisioning,
     });

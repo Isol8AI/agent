@@ -785,7 +785,7 @@ describe("deferred assistant error transcript", () => {
       type: "toolCall" as const,
       id: "call-exec",
       name: "exec",
-      arguments: { code: "const API_TOKEN = computeToken(); return API_TOKEN;" },
+      arguments: { code: "const computedValue = computeValue(); return computedValue;" },
     };
     const failed = makeAgentAssistantMessage({
       content: [{ type: "text", text: "I" }, toolCall],

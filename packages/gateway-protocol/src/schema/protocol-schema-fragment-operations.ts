@@ -30,6 +30,8 @@ export const OperationsProtocolSchemas = {
   AuditEvent: audit.AuditEventSchema,
   AuditListParams: audit.AuditListParamsSchema,
   AuditListResult: audit.AuditListResultSchema,
+  UsersEnsureProfileParams: users.UsersEnsureProfileParamsSchema,
+  UsersEnsureProfileResult: users.UsersEnsureProfileResultSchema,
   UserProfileAuthLink: users.UserProfileAuthLinkSchema,
   UserModelAccount: users.UserModelAccountSchema,
   UsersListModelAccountsParams: users.UsersListModelAccountsParamsSchema,

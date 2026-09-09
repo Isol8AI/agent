@@ -11,7 +11,11 @@ import { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema } from "./se
 import { SessionsRecoverParamsSchema, SessionsRecoverResultSchema } from "./sessions-recover.js";
 import { SessionOwnerSchema } from "./sessions-row.js";
 
-export { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema };
+export {
+  SessionMessageAppendParamsSchema,
+  SessionMessageAppendResultSchema,
+} from "./sessions-create.js";
+export { SessionsCreateParamsSchema, SessionsRoomCreateParamsSchema } from "./sessions-create.js";
 export {
   RoomKindSchema,
   ThreadOriginSchema,
@@ -869,6 +873,7 @@ export type SessionsGroupsDeleteParams = Static<typeof SessionsGroupsDeleteParam
 export type SessionsGroupsMutationResult = Static<typeof SessionsGroupsMutationResultSchema>;
 export type SessionsCompactParams = Static<typeof SessionsCompactParamsSchema>;
 export type SessionsUsageParams = Static<typeof SessionsUsageParamsSchema>;
+
 export type SessionFileContentEncoding = Static<typeof SessionFileContentEncodingSchema>;
 export type SessionFileKind = Static<typeof SessionFileKindSchema>;
 export type SessionFilePreviewKind = Static<typeof SessionFilePreviewKindSchema>;

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { stableStringify } from "@openclaw/normalization-core";
 import {
@@ -48,6 +47,10 @@ import type {
 } from "../config/sessions.js";
 import { resolveAgentMainSessionKey } from "../config/sessions/main-session.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
+import {
+  PRIVATE_ROOM_CAPABILITIES,
+  resolvePrivateRoomSessionRoot,
+} from "../config/sessions/private-room-policy.js";
 import {
   createSessionEntryWithTranscript,
   deleteSessionEntryLifecycle,
@@ -1382,11 +1385,10 @@ export async function createGatewaySession(params: {
           ? resolveSessionModelRef(params.cfg, patched.entry, target.agentId)
           : undefined;
         const privateRoomSessionRoot = hasRestrictedRoomContract
-          ? path.join(
-              resolveAgentDir(params.cfg, target.agentId),
-              "private-rooms",
-              patched.entry.sessionId,
-            )
+          ? resolvePrivateRoomSessionRoot({
+              agentId: target.agentId,
+              sessionId: patched.entry.sessionId,
+            })
           : undefined;
         const privateRoomExecutionPolicy: PrivateRoomExecutionPolicy | undefined =
           privateRoomSessionRoot
@@ -1396,7 +1398,7 @@ export async function createGatewaySession(params: {
                 workspaceAccess: "none",
                 sessionRoot: privateRoomSessionRoot,
                 toolPolicyVersion: "private-room-v1",
-                allowedCapabilities: [],
+                allowedCapabilities: [...PRIVATE_ROOM_CAPABILITIES],
               }
             : undefined;
         const initializedEntry: InternalSessionEntry = {

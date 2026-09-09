@@ -6,6 +6,7 @@ import {
   resolveLivePluginConfigObject,
 } from "openclaw/plugin-sdk/plugin-config-runtime";
 import { definePluginEntry, type OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-entry";
+import { getSessionEntry, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import {
   applyCliRuntimeRecallTimeoutDefault,
   hasDeprecatedModelFallbackPolicy,
@@ -214,6 +215,19 @@ export default definePluginEntry({
         toolAuthority.assertActive();
         refreshLiveConfigFromRuntime();
         const liveConfig = readCurrentConfig();
+        const roomAgentId = resolveStatusUpdateAgentId(ctx);
+        if (
+          ctx.sessionKey &&
+          roomAgentId &&
+          getSessionEntry({
+            agentId: roomAgentId,
+            sessionKey: ctx.sessionKey,
+            storePath: resolveStorePath(liveConfig.session?.store, { agentId: roomAgentId }),
+            readConsistency: "latest",
+          })?.visibility === "restricted"
+        ) {
+          return undefined;
+        }
         // The hook deadline, watchdog, and embedded-run budget all flow from
         // this config, so the CLI-runtime default raise must happen before
         // any of them are armed. Budgeting shares the runner's own dispatch

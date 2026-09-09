@@ -619,12 +619,12 @@ type SessionEntryCore = SessionRestartRecoveryState &
 export interface SessionEntry extends SessionEntryCore {}
 
 export type PrivateRoomExecutionPolicy = {
-  isolationSubject: { type: "session"; sessionId: string };
-  sandbox: "required";
-  workspaceAccess: "none";
-  sessionRoot: string;
-  toolPolicyVersion: "private-room-v1";
-  allowedCapabilities: readonly string[];
+  readonly isolationSubject: Readonly<{ type: "session"; sessionId: string }>;
+  readonly sandbox: "required";
+  readonly workspaceAccess: "none";
+  readonly sessionRoot: string;
+  readonly toolPolicyVersion: "private-room-v1";
+  readonly allowedCapabilities: readonly string[];
 };
 
 /** Internal durable fields excluded from public/plugin session projections. */

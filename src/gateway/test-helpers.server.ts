@@ -66,7 +66,7 @@ import { captureEnv } from "../test-utils/env.js";
 import { getDeterministicFreePortBlock } from "../test-utils/ports.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
-import { buildDeviceAuthPayloadV3 } from "./device-auth.js";
+import { buildDeviceAuthPayloadV3, buildDeviceAuthPayloadV4 } from "./device-auth.js";
 import { gatewayFixtureLifetime } from "./gateway-fixture-lifetime.test-support.js";
 import type { GatewayServerOptions } from "./server.js";
 import { invalidateSessionSharingSnapshot } from "./session-sharing.js";
@@ -1030,6 +1030,7 @@ type ConnectReqDevice = {
 
 type ConnectReqOptions = {
   token?: string;
+  trustedBrokerProfileId?: string;
   bootstrapToken?: string;
   deviceToken?: string;
   password?: string;
@@ -1190,18 +1191,32 @@ export async function connectReq(
       });
     const identity = loadOrCreateDeviceIdentity({ path: identityPath });
     const signedAtMs = Date.now();
-    const payload = buildDeviceAuthPayloadV3({
-      deviceId: identity.deviceId,
-      clientId: client.id,
-      clientMode: client.mode,
-      role,
-      scopes: requestedScopes,
-      signedAtMs,
-      token: authTokenForSignature ?? null,
-      nonce: connectChallengeNonce,
-      platform: client.platform,
-      deviceFamily: client.deviceFamily,
-    });
+    const payload = opts?.trustedBrokerProfileId
+      ? buildDeviceAuthPayloadV4({
+          deviceId: identity.deviceId,
+          clientId: client.id,
+          clientMode: client.mode,
+          role,
+          scopes: requestedScopes,
+          signedAtMs,
+          token: authTokenForSignature ?? null,
+          nonce: connectChallengeNonce,
+          platform: client.platform,
+          deviceFamily: client.deviceFamily,
+          trustedBrokerProfileId: opts.trustedBrokerProfileId,
+        })
+      : buildDeviceAuthPayloadV3({
+          deviceId: identity.deviceId,
+          clientId: client.id,
+          clientMode: client.mode,
+          role,
+          scopes: requestedScopes,
+          signedAtMs,
+          token: authTokenForSignature ?? null,
+          nonce: connectChallengeNonce,
+          platform: client.platform,
+          deviceFamily: client.deviceFamily,
+        });
     return {
       id: identity.deviceId,
       publicKey: publicKeyRawBase64UrlFromPem(identity.publicKeyPem),
@@ -1249,9 +1264,10 @@ export async function connectReq(
         role,
         scopes: requestedScopes,
         auth:
-          token || bootstrapToken || password || deviceToken
+          token || bootstrapToken || password || deviceToken || opts?.trustedBrokerProfileId
             ? {
                 token,
+                trustedBrokerProfileId: opts?.trustedBrokerProfileId,
                 bootstrapToken,
                 deviceToken,
                 password,

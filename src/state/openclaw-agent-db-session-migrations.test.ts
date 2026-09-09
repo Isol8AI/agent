@@ -4,6 +4,7 @@ import { buildConversationRef } from "../routing/conversation-ref.js";
 import {
   backfillSessionConversations,
   ensureSessionAdditiveColumns,
+  ensureSessionMemoryPrivacyColumns,
   migrateConversationDeliveryTargetColumn,
 } from "./openclaw-agent-db-session-migrations.js";
 
@@ -14,6 +15,38 @@ describe("agent DB conversation migration", () => {
     for (const database of databases.splice(0)) {
       database.close();
     }
+  });
+
+  it("migrates exact room privacy but never declassifies unknown deleted archives", () => {
+    const database = new (requireNodeSqlite().DatabaseSync)(":memory:");
+    databases.push(database);
+    database.exec(`
+      CREATE TABLE session_nodes (
+        session_key TEXT, current_session_id TEXT, entry_json TEXT, updated_at INTEGER
+      );
+      CREATE TABLE session_windows (session_id TEXT, session_key TEXT);
+      CREATE TABLE session_transcript_archives (session_id TEXT, session_key TEXT);
+      INSERT INTO session_nodes VALUES
+        ('room', 'private', '{"sessionId":"private","updatedAt":1,"visibility":"restricted"}', 1),
+        ('chat', 'ordinary', '{"sessionId":"ordinary","updatedAt":1}', 1);
+      INSERT INTO session_windows VALUES ('private', 'room'), ('ordinary', 'chat'), ('old', 'room');
+      INSERT INTO session_transcript_archives VALUES
+        ('private', 'room'), ('ordinary', 'chat'), ('old', 'room'), ('deleted', 'gone');
+    `);
+    ensureSessionMemoryPrivacyColumns(database);
+    ensureSessionMemoryPrivacyColumns(database);
+    expect(
+      database
+        .prepare(
+          "SELECT session_id, memory_restricted FROM session_transcript_archives ORDER BY session_id",
+        )
+        .all(),
+    ).toEqual([
+      { session_id: "deleted", memory_restricted: null },
+      { session_id: "old", memory_restricted: null },
+      { session_id: "ordinary", memory_restricted: 0 },
+      { session_id: "private", memory_restricted: 1 },
+    ]);
   });
 
   it("adds nullable route context without advancing the schema version", () => {

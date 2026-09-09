@@ -136,7 +136,7 @@ export type AuthenticatedGatewayConnect = {
   startupPending: boolean;
   device: ConnectParams["device"] | null | undefined;
   devicePublicKey: string | null;
-  deviceAuthPayloadVersion: "v2" | "v3" | null;
+  deviceAuthPayloadVersion: "v2" | "v3" | "v4" | null;
   hasTokenAuth: boolean;
   hasPasswordAuth: boolean;
   bootstrapTokenCandidate?: string;
@@ -153,6 +153,7 @@ export type AuthenticatedGatewayConnect = {
   trustedProxyAuthOk: boolean;
   controlUiPairingKind: ControlUiPairingKind;
   skipLocalBackendSelfPairing: boolean;
+  trustedBrokerProfileId?: string;
   rejectUnauthorized: (failedAuth: GatewayAuthResult) => void;
 };
 

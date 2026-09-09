@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { resolveTimestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import {
+  assertPrivateRoomExecutionTarget,
+  stampPrivateRoomAssistant,
+} from "../../agents/private-room-execution.js";
 import type { OpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import type {
   TranscriptMessageAppendOptions,
@@ -55,6 +59,8 @@ export function appendTranscriptMessageInTransaction<TMessage>(
     appendMode?: "side";
   },
 ): TranscriptMessageAppendResult<TMessage> | undefined {
+  assertPrivateRoomExecutionTarget(resolved);
+  options = { ...options, message: stampPrivateRoomAssistant(options.message) };
   const pending = resolveSessionPendingInputAppend(database, resolved, options.message);
   if (
     pending &&

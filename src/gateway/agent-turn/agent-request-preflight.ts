@@ -3,6 +3,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import { tryResolveLegacyCompatibilityAgentId } from "../../agents/agent-scope.js";
 import { parseExecApprovalFollowupApprovalId } from "../../agents/bash-tools.exec-approval-followup-state.js";
+import { getPrivateRoomExecution } from "../../agents/private-room-execution.js";
 import { normalizeSpawnedRunMetadata } from "../../agents/spawned-context.js";
 import {
   findAuthorizedSwarmCollectorRequest,
@@ -218,7 +219,11 @@ export function prepareAgentRequestPreflight(params: {
   }
   if (
     (requestedInternalSessionEffects || requestedPromptPersistenceSuppression) &&
-    !canUseInternalRuntimeHandoff
+    !canUseInternalRuntimeHandoff &&
+    !(
+      getPrivateRoomExecution()?.runId === request.idempotencyKey &&
+      !requestedInternalSessionEffects
+    )
   ) {
     params.io.emitAcceptance([
       false,

@@ -566,6 +566,7 @@ export function writeSessionEntry(
           session_scope: sessionRow.session_scope,
           transcript_observed_at: transcriptObservedAt,
           session_entry_provenance: sessionRow.session_entry_provenance,
+          memory_restricted: sessionRow.memory_restricted,
           acp_owned: sessionRow.acp_owned,
           plugin_owner_id: sessionRow.plugin_owner_id,
           hook_external_content_source: sessionRow.hook_external_content_source,

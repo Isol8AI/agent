@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { withPrivateRoomExecution } from "../../private-room-execution.js";
 import { prepareEmbeddedSkills } from "../skill-runtime.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
 
@@ -42,6 +43,34 @@ vi.mock("../sandbox-skills.js", () => ({
 describe("prepareEmbeddedSkills", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("does not load global skill context or apply skill environment in a private room", () => {
+    const prepared = withPrivateRoomExecution(
+      {
+        agentId: "main",
+        rootExecutionId: "root",
+        runId: "run",
+        hopCount: 0,
+        sessionKey: "agent:main:room",
+        sessionId: "room",
+        inputMessageId: "input",
+        assertCurrent: () => {},
+        close: () => {},
+      },
+      () =>
+        prepareEmbeddedSkills({
+          includeCodeModeSkills: true,
+          attempt: { config: {} } as EmbeddedRunAttemptParams,
+          effectiveWorkspace: "/tmp/room",
+          sandbox: null,
+          sessionAgentId: "main",
+        }),
+    );
+    expect(prepared.skillsPrompt).toBe("");
+    expect(prepared.codeModeSkills).toEqual([]);
+    expect(mocks.applySkillEnvOverrides).not.toHaveBeenCalled();
+    expect(mocks.mapSandboxSkillEntriesForPrompt).not.toHaveBeenCalled();
   });
 
   it("restores environment overrides when later preparation fails", () => {

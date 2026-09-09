@@ -68,6 +68,7 @@ export const ConnectParamsSchema = closedObject({
       bootstrapToken: Type.Optional(Type.String()),
       deviceToken: Type.Optional(Type.String()),
       password: Type.Optional(Type.String()),
+      trustedBrokerProfileId: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" })),
       approvalRuntimeToken: Type.Optional(Type.String()),
       agentRuntimeIdentityToken: Type.Optional(Type.String()),
     }),

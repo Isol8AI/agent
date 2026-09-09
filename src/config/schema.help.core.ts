@@ -125,6 +125,8 @@ export const CORE_FIELD_HELP: Record<string, string> = {
     "Allows trusted Tailscale identity paths to satisfy gateway auth checks when configured. Use this only when your tailnet identity posture is strong and operator workflows depend on it.",
   "gateway.auth.identityScopes":
     "Maps verified trusted-proxy or Tailscale identities to connection-only operator scope grants. Email keys match case-insensitively; grants augment device scopes before the connection scope cap is applied.",
+  "gateway.auth.trustedBrokerProfiles":
+    "Maps exact paired device IDs to existing non-owner human profile IDs for trusted backend brokers. Requires token auth and a signed trustedBrokerProfileId connect assertion; mapped devices fail closed when the assertion is absent or differs.",
   "gateway.auth.rateLimit":
     "Login/auth attempt throttling controls to reduce credential brute-force risk at the gateway boundary. Keep enabled in exposed environments and tune thresholds to your traffic baseline.",
   "gateway.auth.trustedProxy":

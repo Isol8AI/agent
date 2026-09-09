@@ -20,6 +20,7 @@ import {
   type PreparedModelRuntimeLease,
   type PreparedReplyDispatchRuntime,
 } from "../../agents/prepared-model-runtime.js";
+import { getPrivateRoomExecution } from "../../agents/private-room-execution.js";
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import { resolveIngressWorkspaceOverrideForSessionRun } from "../../agents/spawned-context.js";
 import {
@@ -29,6 +30,7 @@ import {
 import { resolveEffectiveAgentRuntime } from "../../agents/thinking-runtime.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import { privateRoomPolicyForEntry } from "../../config/sessions/private-room-policy.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { assertAgentRunLifecycleGenerationCurrent } from "../../infra/agent-events.js";
 import { claimAgentRunContext } from "../../infra/agent-run-registry.js";
@@ -225,6 +227,9 @@ export async function prepareAgentRunDispatch(params: {
     model: activeModel.model,
   };
   const activeModelProvider = activeModel.provider;
+  if (getPrivateRoomExecution() && resolvedRuntime.harness !== "openclaw") {
+    throw new Error("Private room execution requires the capability-restricted OpenClaw runtime");
+  }
   const lifecycleStorePath = params.resolvedSessionKey
     ? loadSessionEntry(params.resolvedSessionKey, {
         ...(params.activeSessionAgentId ? { agentId: params.activeSessionAgentId } : {}),
@@ -341,11 +346,13 @@ export async function prepareAgentRunDispatch(params: {
     params.io.emitStartOwner?.(params.runId, activeRunAbort.entry);
   }
 
-  const workspaceOverride = resolveIngressWorkspaceOverrideForSessionRun({
-    spawnedBy: params.sessionEntry?.spawnedBy,
-    workspaceDir: params.sessionEntry?.spawnedWorkspaceDir,
-    cwd: params.sessionEntry?.spawnedCwd,
-  });
+  const workspaceOverride =
+    privateRoomPolicyForEntry(params.sessionEntry)?.sessionRoot ??
+    resolveIngressWorkspaceOverrideForSessionRun({
+      spawnedBy: params.sessionEntry?.spawnedBy,
+      workspaceDir: params.sessionEntry?.spawnedWorkspaceDir,
+      cwd: params.sessionEntry?.spawnedCwd,
+    });
   let preparedModelRuntimeLease: PreparedModelRuntimeLease | undefined;
   const cleanupPreaccept = (admissionReleased = false) => {
     preparedModelRuntimeLease?.release();

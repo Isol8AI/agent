@@ -97,6 +97,19 @@ describe("invalid Gateway tokens", () => {
   );
 });
 
+describe("trusted broker profile bindings", () => {
+  it("rejects bindings outside token mode", () => {
+    const raw = {
+      mode: "password" as const,
+      password: "secret",
+      trustedBrokerProfiles: { ["a".repeat(64)]: "profile-human-1" },
+    };
+    const auth = resolveGatewayAuth({ authConfig: raw });
+
+    expect(() => assertGatewayAuthConfigured(auth, raw)).toThrow(/requires.*token/u);
+  });
+});
+
 describe.each([
   ["HTTP", authorizeHttpGatewayConnect],
   ["Control UI HTTP read", authorizeControlUiReadHttpGatewayConnect],

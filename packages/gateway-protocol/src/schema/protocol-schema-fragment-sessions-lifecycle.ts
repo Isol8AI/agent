@@ -3,6 +3,11 @@ import * as viewerPresence from "./sessions-viewer-presence.js";
 import * as sessions from "./sessions.js";
 
 export const SessionLifecycleProtocolSchemas = {
+  SessionExecutionDispatchParams: viewerPresence.SessionExecutionDispatchParamsSchema,
+  NativePresenceEvent: viewerPresence.NativePresenceEventSchema,
+  NativePresenceSnapshot: viewerPresence.NativePresenceSnapshotSchema,
+  SessionsPresenceParams: viewerPresence.SessionsPresenceParamsSchema,
+  SessionsPresenceHeartbeatParams: viewerPresence.SessionsPresenceHeartbeatParamsSchema,
   SessionsGoalUpdateParams: sessions.SessionsGoalUpdateParamsSchema,
   SessionsGoalClearParams: sessions.SessionsGoalClearParamsSchema,
   SessionsGoalMutationResult: sessions.SessionsGoalMutationResultSchema,

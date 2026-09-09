@@ -9,6 +9,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { clampPositiveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { isPromiseLike } from "@openclaw/normalization-core/promise-like";
+import { getPrivateRoomExecution } from "../agents/private-room-execution.js";
 import { createToolPolicyMatcher } from "../agents/tool-policy-match.js";
 import {
   attachToolAllowlistIntersection,
@@ -1061,6 +1062,10 @@ export function createHookRunner(
     event: PluginHookBeforePromptBuildEvent,
     ctx: PluginHookAgentContext,
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
+    // Private v1 has no plugin/global-memory context enrichment capability.
+    if (getPrivateRoomExecution()) {
+      return undefined;
+    }
     if (beforePromptBuildDispatch.getStore()?.active) {
       return undefined;
     }
@@ -1092,6 +1097,9 @@ export function createHookRunner(
       assertHostActive: () => void;
     },
   ): Promise<PluginHookBeforePromptBuildResult | undefined> {
+    if (getPrivateRoomExecution()) {
+      return undefined;
+    }
     const sourceFingerprint = params.toolAuthorityFingerprint.trim();
     if (!sourceFingerprint) {
       return undefined;
@@ -1149,6 +1157,9 @@ export function createHookRunner(
     event: PluginAgentTurnPrepareEvent,
     ctx: PluginHookAgentContext,
   ): Promise<PluginAgentTurnPrepareResult | undefined> {
+    if (getPrivateRoomExecution()) {
+      return undefined;
+    }
     return runModifyingHook<"agent_turn_prepare", PluginAgentTurnPrepareResult>(
       "agent_turn_prepare",
       event,
@@ -1183,6 +1194,11 @@ export function createHookRunner(
     ctx: PluginHookAgentContext,
     optionsLocal?: VoidHookRunOptions,
   ): Promise<void> {
+    // Completion hooks can persist transcript text into global plugin memory.
+    // Keep this fence even after the private execution has closed or been revoked.
+    if (getPrivateRoomExecution()) {
+      return;
+    }
     return runVoidHook("agent_end", withAgentRunId(event, ctx), ctx, optionsLocal);
   }
 

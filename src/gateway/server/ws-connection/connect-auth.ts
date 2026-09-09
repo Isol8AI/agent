@@ -1,3 +1,7 @@
+import {
+  GATEWAY_CLIENT_IDS,
+  GATEWAY_CLIENT_MODES,
+} from "../../../../packages/gateway-protocol/src/client-info.js";
 // Gateway WebSocket connect authentication validates protocol, origin, credentials, and device proof.
 import {
   ConnectErrorDetailCodes,
@@ -438,6 +442,35 @@ async function authenticateGatewayConnectCore(
     rejectUnauthorized(authResult);
     return undefined;
   }
+  const assertedTrustedBrokerProfileId = connectParams.auth?.trustedBrokerProfileId;
+  const configuredTrustedBrokerProfileId = device?.id
+    ? context.configSnapshot.gateway?.auth?.trustedBrokerProfiles?.[device.id]
+    : undefined;
+  let trustedBrokerProfileId: string | undefined;
+  if (assertedTrustedBrokerProfileId || configuredTrustedBrokerProfileId) {
+    const validTrustedBrokerAssertion =
+      authMethod === "token" &&
+      role === "operator" &&
+      connectParams.client.id === GATEWAY_CLIENT_IDS.GATEWAY_CLIENT &&
+      connectParams.client.mode === GATEWAY_CLIENT_MODES.BACKEND &&
+      !hasBrowserOriginHeader &&
+      deviceProof.deviceAuthPayloadVersion === "v4" &&
+      assertedTrustedBrokerProfileId === configuredTrustedBrokerProfileId;
+    if (!validTrustedBrokerAssertion) {
+      const message = "trusted broker profile assertion rejected";
+      markHandshakeFailure(
+        "trusted-broker-profile-rejected",
+        device?.id ? { deviceId: device.id } : {},
+      );
+      sendHandshakeErrorResponse(ErrorCodes.INVALID_REQUEST, message);
+      close(1008, message);
+      return undefined;
+    }
+    trustedBrokerProfileId = assertedTrustedBrokerProfileId;
+    // A profile-bearing broker connect must never inherit the local backend
+    // shared-secret exception. Its distinct device needs an ordinary live pairing.
+    skipLocalBackendSelfPairing = false;
+  }
   const boundBootstrapContext =
     authMethod === "bootstrap-token" && bootstrapTokenCandidate && device
       ? await getBoundDeviceBootstrapContext({
@@ -564,6 +597,7 @@ async function authenticateGatewayConnectCore(
     trustedProxyAuthOk,
     controlUiPairingKind,
     skipLocalBackendSelfPairing,
+    ...(trustedBrokerProfileId ? { trustedBrokerProfileId } : {}),
     rejectUnauthorized,
   };
 }

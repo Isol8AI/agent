@@ -235,6 +235,8 @@ export type GatewayAuthConfig = {
   allowTailscale?: boolean;
   /** Operator scopes granted to verified trusted-proxy or Tailscale identities. */
   identityScopes?: Record<string, OperatorScope[]>;
+  /** Exact paired broker device IDs mapped to durable non-owner human profile IDs. */
+  trustedBrokerProfiles?: Record<string, string>;
   /** Rate-limit configuration for failed authentication attempts. */
   rateLimit?: GatewayAuthRateLimitConfig;
   /**

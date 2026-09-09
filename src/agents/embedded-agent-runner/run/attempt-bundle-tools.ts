@@ -8,6 +8,7 @@ import {
 } from "../../agent-bundle-mcp-tools.js";
 import { wrapToolWithAbortSignal } from "../../agent-tools.abort.js";
 import { filterLocalModelLeanTools } from "../../local-model-lean.js";
+import { getPrivateRoomExecution } from "../../private-room-execution.js";
 import { recordAgentCleanupFailure } from "../../run-cleanup-timeout.js";
 import { normalizeAgentRuntimeTools } from "../../runtime-plan/tools.js";
 import { createRuntimeToolMatcher } from "../../tool-policy-match.js";
@@ -35,6 +36,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
   isRawModelRun: boolean;
   preparedToolBase: PreparedToolBase;
 }) {
+  const privateExecution = getPrivateRoomExecution();
   const {
     cronCreatorToolAllowlist,
     cronCreatorToolAllowlistCaptureRef,
@@ -69,6 +71,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
     });
   const tools = normalizeTools(toolsEnabled ? toolsRaw : []);
   const providedClientTools =
+    !privateExecution &&
     toolsEnabled &&
     !params.attempt.disableTools &&
     !params.isRawModelRun &&
@@ -100,6 +103,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
     toolOverrides: params.attempt.toolOverrides,
   };
   const bundleMcpEnabled =
+    !privateExecution &&
     !params.attempt.forceRestartSafeTools &&
     shouldCreateBundleMcpRuntimeForAttempt({
       toolsEnabled,
@@ -152,6 +156,7 @@ export async function prepareEmbeddedAttemptBundleTools(params: {
   let bundleLspRuntime: Awaited<ReturnType<typeof createBundleLspToolRuntime>> | undefined;
   try {
     const bundleLspEnabled =
+      !privateExecution &&
       !params.attempt.forceRestartSafeTools &&
       shouldCreateBundleLspRuntimeForAttempt({
         toolsEnabled,

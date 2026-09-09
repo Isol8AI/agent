@@ -42,6 +42,7 @@ function mergeGatewayAuthConfig(
     "password",
     "allowTailscale",
     "rateLimit",
+    "trustedBrokerProfiles",
     "trustedProxy",
   ] as const) {
     if (override[key] !== undefined) {

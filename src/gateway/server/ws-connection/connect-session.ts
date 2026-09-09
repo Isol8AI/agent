@@ -57,6 +57,7 @@ import { prepareGatewayNodeConnect } from "./connect-node-session.js";
 import {
   resolveAuthenticatedProfile,
   resolveGatewayConnectUserProfile,
+  resolveTrustedBrokerProfile,
 } from "./connect-user-profile.js";
 import { resolveControlUiBuildMismatch } from "./control-ui-build-admission.js";
 import type {
@@ -127,6 +128,7 @@ export async function attachAuthenticatedGatewayConnect(
     pairingLocality,
     sessionUsesSharedGatewayAuth,
     sessionSharedGatewaySessionGeneration,
+    trustedBrokerProfileId,
   } = state;
   if (!(await prepareGatewayNodeConnect(context, state))) {
     return;
@@ -195,33 +197,40 @@ export async function attachAuthenticatedGatewayConnect(
   });
   const rolesConfigured = Boolean(context.configSnapshot.gateway?.roles);
   const sharedSecretOperatorOwner =
-    role === "operator" && (authMethod === "token" || authMethod === "password");
+    !trustedBrokerProfileId &&
+    role === "operator" &&
+    (authMethod === "token" || authMethod === "password");
   // Synthetic callers bypass WS admission; ephemeral control-plane clients stay unprofiled.
   const ownerProfileExpected =
     shouldTrackPresence &&
+    !trustedBrokerProfileId &&
     shouldUseGatewayOwnerProfile({ role, authenticatedUserId, authMethod, rolesConfigured });
   let authenticatedUserProfile: GatewayWsClient["authenticatedUserProfile"];
   if (
+    trustedBrokerProfileId ||
     ownerProfileExpected ||
     (authenticatedUserId && (!resolveAuthenticatedGitHubIdentity || rolesConfigured))
   ) {
     try {
       // The live profile callback refreshes edits and detached provider-avatar adoption.
-      authenticatedUserProfile = await resolveGatewayConnectUserProfile({
-        ownerProfileExpected,
-        authenticatedUserId,
-        authResult,
-        resolveAuthenticatedGitHubIdentity,
-      });
+      authenticatedUserProfile = trustedBrokerProfileId
+        ? resolveTrustedBrokerProfile(trustedBrokerProfileId)
+        : await resolveGatewayConnectUserProfile({
+            ownerProfileExpected,
+            authenticatedUserId,
+            authResult,
+            resolveAuthenticatedGitHubIdentity,
+          });
     } catch (error) {
       logWsControl.warn(
         `user profile resolution failed conn=${connId} user=${formatForLog(authenticatedUserId)}: ${formatForLog(error)}`,
       );
       if (
-        !ownerProfileExpected &&
-        rolesConfigured &&
-        role === "operator" &&
-        !sharedSecretOperatorOwner
+        trustedBrokerProfileId ||
+        (!ownerProfileExpected &&
+          rolesConfigured &&
+          role === "operator" &&
+          !sharedSecretOperatorOwner)
       ) {
         await rejectUnavailableProfileConnect(context, error);
         return;
@@ -385,6 +394,7 @@ export async function attachAuthenticatedGatewayConnect(
   const internal = {
     ...(isLocalClient ? { isLocalClient: true as const } : {}),
     ...(controlUiAdmin ? { controlUiAdmin: true as const } : {}),
+    ...(trustedBrokerProfileId ? { trustedHumanBroker: true as const } : {}),
     ...(isTrustedApprovalRuntime ? { approvalRuntime: true } : {}),
     ...(trustedAgentRuntimeIdentity ? { agentRuntimeIdentity: trustedAgentRuntimeIdentity } : {}),
     ...(sharedSecretOperatorOwner ? { operatorRoleActor: { kind: "system" as const } } : {}),
@@ -392,7 +402,8 @@ export async function attachAuthenticatedGatewayConnect(
   const prepareLocalUserIngress = (profile = authenticatedUserProfile) =>
     prepareGatewayLocalUserIngress({
       authMethod,
-      authenticatedUserExpected: Boolean(authenticatedUserId) || ownerProfileExpected,
+      authenticatedUserExpected:
+        Boolean(authenticatedUserId) || ownerProfileExpected || Boolean(trustedBrokerProfileId),
       ...(profile
         ? {
             profile: {
