@@ -3,7 +3,7 @@ import * as viewerPresence from "./sessions-viewer-presence.js";
 import * as sessions from "./sessions.js";
 
 export const SessionLifecycleProtocolSchemas = {
-  SessionExecutionDispatchParams: sessions.SessionExecutionDispatchParamsSchema,
+  SessionExecutionDispatchParams: viewerPresence.SessionExecutionDispatchParamsSchema,
   NativePresenceEvent: viewerPresence.NativePresenceEventSchema,
   NativePresenceSnapshot: viewerPresence.NativePresenceSnapshotSchema,
   SessionsPresenceParams: viewerPresence.SessionsPresenceParamsSchema,

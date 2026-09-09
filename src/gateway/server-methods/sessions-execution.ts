@@ -6,7 +6,7 @@ import {
   errorShape,
   type SessionMemberIdentity,
 } from "../../../packages/gateway-protocol/src/index.js";
-import { SessionExecutionDispatchParamsSchema } from "../../../packages/gateway-protocol/src/schema/sessions.js";
+import { SessionExecutionDispatchParamsSchema } from "../../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
 import {
   privateRoomExecutionForRun,
   withPrivateRoomExecution,

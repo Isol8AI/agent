@@ -1,9 +1,7 @@
 import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vitest";
-import {
-  SessionExecutionDispatchParamsSchema,
-  type SessionMessageAppendResult,
-} from "../../../packages/gateway-protocol/src/schema/sessions.js";
+import { SessionExecutionDispatchParamsSchema } from "../../../packages/gateway-protocol/src/schema/sessions-viewer-presence.js";
+import { type SessionMessageAppendResult } from "../../../packages/gateway-protocol/src/schema/sessions.js";
 import { PRIVATE_ROOM_CAPABILITIES } from "../../config/sessions/private-room-policy.js";
 import {
   createSessionEntryWithTranscript,

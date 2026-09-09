@@ -109,3 +109,12 @@ export type NativeVisibilityProjection = NativePresenceEvent["visibility"];
 export type NativeRecentInputProjection = NativePresenceEvent["recentInput"];
 export type NativeViewingIntent = NativePresenceEvent["viewingIntent"];
 export type SessionsPresenceHeartbeatParams = Static<typeof SessionsPresenceHeartbeatParamsSchema>;
+
+export const SessionExecutionDispatchParamsSchema = closedObject({
+  sessionKey: ChatSendSessionKeyString,
+  expectedSessionId: NonEmptyString,
+  inputMessageId: NonEmptyString,
+  idempotencyKey: NonEmptyString,
+  hopCount: Type.Optional(Type.Integer({ minimum: 0, maximum: 3 })),
+});
+export type SessionExecutionDispatchParams = Static<typeof SessionExecutionDispatchParamsSchema>;
