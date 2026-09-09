@@ -4,6 +4,7 @@ import {
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { AGENT_V14_SESSION_SHARING_SCHEMA_SQL } from "../state/openclaw-agent-session-sharing-schema.js";
 import {
   closeOpenClawStateDatabaseForTest,
   openOpenClawStateDatabase,
@@ -35,6 +36,8 @@ describe("media persistence gateway lifecycle recovery", () => {
     const database = new DatabaseSync(databasePath);
     database.exec(`
       DROP TABLE session_participants;
+      DROP TABLE session_members;
+      ${AGENT_V14_SESSION_SHARING_SCHEMA_SQL}
       PRAGMA user_version = 14;
       UPDATE schema_meta SET schema_version = 14 WHERE meta_key = 'primary';
     `);
