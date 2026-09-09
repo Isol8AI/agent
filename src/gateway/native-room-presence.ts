@@ -13,6 +13,8 @@ import { SESSION_VIEWER_PRESENCE_MAX_KEYS } from "../../packages/gateway-protoco
 
 export type NativePresenceAuthority = {
   actor: NativePresenceActor;
+  /** Exact persisted session lifecycle; never accepted from the wire. */
+  sessionId: string;
   /** Revalidate the exact room instance and live membership synchronously. */
   isAuthorized: () => boolean;
 };
@@ -40,7 +42,7 @@ export function createNativeRoomPresence(params: {
   const clock = () => epoch + Math.floor(performance.now() - elapsed);
   const connections = new Map<string, Connection>();
   const subscriptions = new Map<string, Map<string, NativePresenceAuthority>>();
-  const tombstones = new Map<string, NativePresenceEvent>();
+  const tombstones = new Map<string, { sessionId: string; event: NativePresenceEvent }>();
   let lastNow: number | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
@@ -53,14 +55,15 @@ export function createNativeRoomPresence(params: {
     lastNow = Math.max(lastNow ?? sampled, sampled);
     return lastNow;
   };
-  const actorKey = (room: string, actor: NativePresenceActor) =>
-    JSON.stringify([room, actor.type, actor.id]);
+  const lifecycleKey = (room: string, sessionId: string) => JSON.stringify([room, sessionId]);
+  const actorKey = (room: string, sessionId: string, actor: NativePresenceActor) =>
+    JSON.stringify([room, sessionId, actor.type, actor.id]);
   const authorized = (authority: NativePresenceAuthority) => authority.isAuthorized();
-  const send = (event: NativePresenceEvent) => {
+  const send = (event: NativePresenceEvent, sessionId: string) => {
     const recipients = new Set<string>();
     for (const [connId, rooms] of subscriptions) {
       const authority = rooms.get(event.roomKey);
-      if (!authority) {
+      if (!authority || authority.sessionId !== sessionId) {
         continue;
       }
       try {
@@ -78,7 +81,7 @@ export function createNativeRoomPresence(params: {
   const publish = (connection: Connection, lease: Lease, at: number) => {
     lease.event.sequence = ++connection.sequence;
     lease.event.serverReceivedAtMs = at;
-    send(lease.event);
+    send(lease.event, lease.authority.sessionId);
   };
   const project = (lease: Lease, at: number) => {
     const event = lease.event;
@@ -111,15 +114,19 @@ export function createNativeRoomPresence(params: {
     leaseCount -= 1;
     lease.event.state = "offline";
     lease.event.expiresAtMs = at;
-    const key = actorKey(room, lease.event.actor);
+    const key = actorKey(room, lease.authority.sessionId, lease.event.actor);
     const remaining = [...connections.values()].some((candidate) => {
       const other = candidate.rooms.get(room);
-      return other && other.leaseExpiresAtMs > at && actorKey(room, other.event.actor) === key;
+      return (
+        other &&
+        other.leaseExpiresAtMs > at &&
+        actorKey(room, other.authority.sessionId, other.event.actor) === key
+      );
     });
     if (!remaining) {
       lease.event.authoritativeLastSeenAtMs = at;
       tombstones.delete(key);
-      tombstones.set(key, lease.event);
+      tombstones.set(key, { sessionId: lease.authority.sessionId, event: lease.event });
       while (tombstones.size > NATIVE_PRESENCE_MAX_CONNECTIONS) {
         tombstones.delete(tombstones.keys().next().value!);
       }
@@ -128,7 +135,7 @@ export function createNativeRoomPresence(params: {
   };
   const reconcile = (at: number) => {
     // ponytail: bounded lease scan; index by room if measured fanout requires it.
-    const failedRooms = new Set<string>();
+    const failedLifecycles = new Set<string>();
     for (const [transportId, connection] of connections) {
       for (const [room, lease] of connection.rooms) {
         try {
@@ -142,14 +149,14 @@ export function createNativeRoomPresence(params: {
             publish(connection, lease, at);
           }
         } catch {
-          failedRooms.add(room);
+          failedLifecycles.add(lifecycleKey(room, lease.authority.sessionId));
         }
       }
       if (connection.rooms.size === 0) {
         connections.delete(transportId);
       }
     }
-    for (const [key, event] of tombstones) {
+    for (const [key, { event }] of tombstones) {
       if (at - event.serverReceivedAtMs >= PRESENCE_AVAILABLE_ACTIVITY_MS) {
         tombstones.delete(key);
       }
@@ -168,7 +175,7 @@ export function createNativeRoomPresence(params: {
         subscriptions.delete(transportId);
       }
     }
-    return failedRooms;
+    return failedLifecycles;
   };
   const schedule = () => {
     if (timer) {
@@ -224,7 +231,15 @@ export function createNativeRoomPresence(params: {
       connections.set(transportId, connection);
     }
     let lease = connection.rooms.get(room);
-    if (lease && actorKey(room, lease.event.actor) !== actorKey(room, authority.actor)) {
+    if (lease && lease.authority.sessionId !== authority.sessionId) {
+      retire(connection, room, lease, at);
+      lease = undefined;
+    }
+    if (
+      lease &&
+      actorKey(room, authority.sessionId, lease.event.actor) !==
+        actorKey(room, authority.sessionId, authority.actor)
+    ) {
       throw new Error("native presence connection identity changed");
     }
     if (!lease) {
@@ -253,7 +268,7 @@ export function createNativeRoomPresence(params: {
       };
       connection.rooms.set(room, lease);
       leaseCount += 1;
-      tombstones.delete(actorKey(room, authority.actor));
+      tombstones.delete(actorKey(room, authority.sessionId, authority.actor));
     }
     lease.authority = authority;
     return { connection, lease };
@@ -277,7 +292,10 @@ export function createNativeRoomPresence(params: {
     reconcile(at);
     const existing = connections.get(transportId)?.rooms.get(room);
     // Typing does not establish or extend a presence lease.
-    if (intent.typing !== undefined && !existing) {
+    if (
+      intent.typing !== undefined &&
+      (!existing || existing.authority.sessionId !== authority.sessionId)
+    ) {
       return undefined;
     }
     const { connection, lease } = admit(transportId, room, authority, at);
@@ -327,13 +345,13 @@ export function createNativeRoomPresence(params: {
       }
       schedule();
     },
-    snapshot(room: string): NativePresenceSnapshot {
+    snapshot(room: string, authority: NativePresenceAuthority): NativePresenceSnapshot {
       const at = now();
-      let failed = reconcile(at).has(room);
+      let failed = reconcile(at).has(lifecycleKey(room, authority.sessionId));
       const events: NativePresenceEvent[] = [];
       for (const connection of connections.values()) {
         const lease = connection.rooms.get(room);
-        if (!lease) {
+        if (!lease || lease.authority.sessionId !== authority.sessionId) {
           continue;
         }
         try {
@@ -344,8 +362,9 @@ export function createNativeRoomPresence(params: {
           failed = true;
         }
       }
-      for (const event of tombstones.values()) {
-        if (event.roomKey === room) {
+      for (const tombstone of tombstones.values()) {
+        const { event } = tombstone;
+        if (event.roomKey === room && tombstone.sessionId === authority.sessionId) {
           events.push({ ...event, actor: { ...event.actor } });
         }
       }

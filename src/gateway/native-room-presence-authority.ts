@@ -37,6 +37,7 @@ export function prepareNativeRoomPresenceAuthority(params: {
   const sessionId = target.entry.sessionId;
   const authority: NativePresenceAuthority = {
     actor: { type: "profile", id: profileId },
+    sessionId,
     isAuthorized: () => {
       if (client.invalidated || client.authenticatedUserProfile?.profileId !== profileId) {
         return false;

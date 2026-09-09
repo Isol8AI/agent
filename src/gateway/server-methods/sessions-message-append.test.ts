@@ -281,6 +281,17 @@ describe("sessions.message.append", () => {
       const pending = invoke();
       removeSessionMember(scope, { type: "profile", id: "member" }, undefined, scope.sessionId);
       expect((await pending)[0]).toBe(false);
+      addSessionMember(scope, {
+        identity: { type: "profile", id: "member" },
+        addedBy: "owner",
+        expectedSessionId: scope.sessionId,
+      });
+      const broker = identifiedClient("member");
+      broker.connect.scopes = ["operator.admin"];
+      broker.internal = { trustedHumanBroker: true };
+      const pendingBroker = invoke({ idempotencyKey: "broker-contribution" }, broker);
+      removeSessionMember(scope, { type: "profile", id: "member" }, undefined, scope.sessionId);
+      expect((await pendingBroker)[0]).toBe(false);
       expect(loadTranscriptEventsSync(scope).filter(readTranscriptEventMessage)).toEqual([]);
       expect(listSessionParticipantsReadOnly(scope).size).toBe(0);
       await upsertSessionEntryCore(scope, { sessionId: "replacement", updatedAt: 2 });

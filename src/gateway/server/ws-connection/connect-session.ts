@@ -394,6 +394,7 @@ export async function attachAuthenticatedGatewayConnect(
   const internal = {
     ...(isLocalClient ? { isLocalClient: true as const } : {}),
     ...(controlUiAdmin ? { controlUiAdmin: true as const } : {}),
+    ...(trustedBrokerProfileId ? { trustedHumanBroker: true as const } : {}),
     ...(isTrustedApprovalRuntime ? { approvalRuntime: true } : {}),
     ...(trustedAgentRuntimeIdentity ? { agentRuntimeIdentity: trustedAgentRuntimeIdentity } : {}),
     ...(sharedSecretOperatorOwner ? { operatorRoleActor: { kind: "system" as const } } : {}),

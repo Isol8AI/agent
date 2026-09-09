@@ -1,5 +1,5 @@
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { HelloOk } from "../../packages/gateway-protocol/src/schema/frames.js";
 import {
   GATEWAY_OWNER_PROFILE_ID,
@@ -12,6 +12,7 @@ import { approveDevicePairing } from "../infra/device-pairing-approval.js";
 import { revokeDeviceToken } from "../infra/device-pairing-tokens.js";
 import { getPairedDevice, requestDevicePairing } from "../infra/device-pairing.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
+import { usersHandlers } from "./server-methods/users.js";
 import {
   BACKEND_GATEWAY_CLIENT,
   connectReq,
@@ -50,32 +51,40 @@ describe("token-authenticated trusted broker profiles", () => {
     const device = loadOrCreateDeviceIdentity({ path: deviceIdentityPath });
     const profile = ensureProfileForEmail("human@example.com");
     await configure({ [device.deviceId]: profile.id });
+    const selfHandler = vi.spyOn(usersHandlers, "users.self");
 
-    await withGatewayServer(async ({ port }) => {
-      const ws = await openWs(port);
-      try {
-        const connected = await connectReq(ws, {
-          token: TOKEN,
-          trustedBrokerProfileId: profile.id,
-          prePairDevice: true,
-          scopes: SCOPES,
-          client: BACKEND_GATEWAY_CLIENT,
-          deviceIdentityPath,
-        });
-        expect(connected.ok, JSON.stringify(connected.error)).toBe(true);
-        const hello = connected.payload as HelloOk;
-        expect(hello.auth).not.toHaveProperty("token");
-        expect(hello.auth).not.toHaveProperty("trustedBrokerProfileId");
-        expect(hello.auth).not.toHaveProperty("deviceToken");
-        expect(hello.auth).not.toHaveProperty("deviceTokens");
-        expect(await rpcReq<UsersSelfResult>(ws, "users.self")).toMatchObject({
-          ok: true,
-          payload: { profile: { id: profile.id } },
-        });
-      } finally {
-        ws.close();
-      }
-    });
+    try {
+      await withGatewayServer(async ({ port }) => {
+        const ws = await openWs(port);
+        try {
+          const connected = await connectReq(ws, {
+            token: TOKEN,
+            trustedBrokerProfileId: profile.id,
+            prePairDevice: true,
+            scopes: SCOPES,
+            client: BACKEND_GATEWAY_CLIENT,
+            deviceIdentityPath,
+          });
+          expect(connected.ok, JSON.stringify(connected.error)).toBe(true);
+          const hello = connected.payload as HelloOk;
+          expect(hello.auth).not.toHaveProperty("token");
+          expect(hello.auth).not.toHaveProperty("trustedBrokerProfileId");
+          expect(hello.auth).not.toHaveProperty("deviceToken");
+          expect(hello.auth).not.toHaveProperty("deviceTokens");
+          expect(await rpcReq<UsersSelfResult>(ws, "users.self")).toMatchObject({
+            ok: true,
+            payload: { profile: { id: profile.id } },
+          });
+          expect(selfHandler.mock.lastCall?.[0].client?.internal).toMatchObject({
+            trustedHumanBroker: true,
+          });
+        } finally {
+          ws.close();
+        }
+      });
+    } finally {
+      selfHandler.mockRestore();
+    }
   });
 
   test("rejects a mapped device without creating a missing pairing", async () => {

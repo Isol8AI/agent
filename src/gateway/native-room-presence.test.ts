@@ -26,6 +26,7 @@ vi.mock("./native-room-presence-authority.js", () => ({
           roomKey: sessionKey,
           authority: {
             actor: { type: "profile", id: "server-profile" },
+            sessionId: "session-room",
             isAuthorized: () => access.allowed,
           },
         }
@@ -35,7 +36,11 @@ vi.mock("./native-room-presence-authority.js", () => ({
 const start = 1_800_000_000_000;
 const room = "agent:main:room";
 const actor = { type: "profile" as const, id: "human-one" };
-const authority: NativePresenceAuthority = { actor, isAuthorized: () => true };
+const authority: NativePresenceAuthority = {
+  actor,
+  sessionId: "session-room",
+  isAuthorized: () => true,
+};
 const online = {
   heartbeat: true,
   visibility: "visible" as const,
@@ -57,7 +62,7 @@ describe("native room presence lifecycle", () => {
     const emit = vi.fn();
     const presence = createNativeRoomPresence({ emit });
     presence.subscribe("background", room, authority);
-    expect(presence.snapshot(room).connections).toEqual([]);
+    expect(presence.snapshot(room, authority).connections).toEqual([]);
     const viewing = presence.update("foreground", room, authority, { viewingIntent: "viewing" });
     expect(viewing).toMatchObject({
       state: "unknown",
@@ -72,13 +77,13 @@ describe("native room presence lifecycle", () => {
       visibility: "visible",
       recentInput: "recent",
     });
-    expect(presence.snapshot(room).connections[0]).toMatchObject({
+    expect(presence.snapshot(room, authority).connections[0]).toMatchObject({
       state: "online",
       sequence: 2,
       expiresAtMs: start + 90_000,
     });
     presence.clearViewing("foreground", new Set());
-    expect(presence.snapshot(room).connections[0]).toMatchObject({
+    expect(presence.snapshot(room, authority).connections[0]).toMatchObject({
       state: "away",
       viewingIntent: "not-viewing",
     });
@@ -92,15 +97,15 @@ describe("native room presence lifecycle", () => {
     vi.advanceTimersByTime(1);
     const second = presence.update("tab-two", room, authority, online)!;
     expect(second.connectionId).not.toBe(first.connectionId);
-    expect(presence.snapshot(room).connections).toHaveLength(2);
+    expect(presence.snapshot(room, authority).connections).toHaveLength(2);
     presence.disconnect("tab-two", true);
-    expect(presence.snapshot(room).connections).toEqual([first]);
+    expect(presence.snapshot(room, authority).connections).toEqual([first]);
     const reconnected = presence.update("tab-two-reconnected", room, authority, online)!;
     expect(reconnected.connectionId).not.toBe(second.connectionId);
     expect(reconnected.sequence).toBe(1);
     presence.disconnect("tab-one", true);
     presence.disconnect("tab-two-reconnected", true);
-    expect(presence.snapshot(room).connections).toEqual([
+    expect(presence.snapshot(room, authority).connections).toEqual([
       expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start + 1 }),
     ]);
     presence.stop();
@@ -116,9 +121,9 @@ describe("native room presence lifecycle", () => {
     });
     presence.disconnect("one", false);
     vi.advanceTimersByTime(999);
-    expect(presence.snapshot(room).connections[0].state).toBe("typing");
+    expect(presence.snapshot(room, authority).connections[0].state).toBe("typing");
     vi.advanceTimersByTime(1);
-    expect(presence.snapshot(room).connections[0]).toMatchObject({
+    expect(presence.snapshot(room, authority).connections[0]).toMatchObject({
       state: "offline",
       authoritativeLastSeenAtMs: start + 90_000,
     });
@@ -137,7 +142,7 @@ describe("native room presence lifecycle", () => {
       expiresAtMs: start + 3_500,
     });
     vi.advanceTimersByTime(2_500);
-    expect(presence.snapshot(room).connections[0].state).toBe("online");
+    expect(presence.snapshot(room, authority).connections[0].state).toBe("online");
     vi.advanceTimersByTime(26_500);
     for (let heartbeat = 1; heartbeat <= 10; heartbeat += 1) {
       presence.update("one", room, authority, { heartbeat: true });
@@ -145,7 +150,7 @@ describe("native room presence lifecycle", () => {
         vi.advanceTimersByTime(30_000);
       }
     }
-    expect(presence.snapshot(room).connections[0]).toMatchObject({
+    expect(presence.snapshot(room, authority).connections[0]).toMatchObject({
       state: "away",
       recentInput: "stale",
       recentInputObservedAtMs: start,
@@ -160,7 +165,7 @@ describe("native room presence lifecycle", () => {
     vi.setSystemTime(start - 500_000);
     const event = presence.update("one", room, authority, { heartbeat: true });
     expect(event).toMatchObject({ serverReceivedAtMs: start + 30_000, sequence: 2 });
-    expect(presence.snapshot(room).serverNowAtMs).toBe(start + 30_000);
+    expect(presence.snapshot(room, authority).serverNowAtMs).toBe(start + 30_000);
     presence.stop();
   });
 
@@ -168,6 +173,7 @@ describe("native room presence lifecycle", () => {
     let access: "allowed" | "denied" | "failed" = "allowed";
     const revocable = {
       actor,
+      sessionId: "session-room",
       isAuthorized: () => {
         if (access === "failed") {
           throw new Error("storage unavailable");
@@ -181,23 +187,78 @@ describe("native room presence lifecycle", () => {
     presence.update("one", room, revocable, online);
     presence.update("two", room, revocable, online);
     access = "failed";
-    expect(presence.snapshot(room)).toMatchObject({ inventoryStatus: "failed", connections: [] });
+    expect(presence.snapshot(room, revocable)).toMatchObject({
+      inventoryStatus: "failed",
+      connections: [],
+    });
     presence.update(
       "other",
       room,
-      { actor: { type: "agent", id: "runtime-agent" }, isAuthorized: () => true },
+      {
+        actor: { type: "agent", id: "runtime-agent" },
+        sessionId: "session-room",
+        isAuthorized: () => true,
+      },
       online,
     );
-    expect(presence.snapshot(room)).toMatchObject({
+    expect(presence.snapshot(room, revocable)).toMatchObject({
       inventoryStatus: "incomplete",
       connections: [expect.objectContaining({ actor: { type: "agent", id: "runtime-agent" } })],
     });
     access = "denied";
     presence.revalidate();
     expect(
-      presence.snapshot(room).connections.filter((event) => event.actor.type === "profile"),
+      presence
+        .snapshot(room, { ...revocable, isAuthorized: () => true })
+        .connections.filter((event) => event.actor.type === "profile"),
     ).toEqual([expect.objectContaining({ state: "offline", authoritativeLastSeenAtMs: start })]);
     expect(emit.mock.lastCall?.[1]).toEqual(new Set());
+    presence.stop();
+  });
+
+  it("isolates active leases, subscriptions, and tombstones by exact session lifecycle", () => {
+    let currentSessionId = "session-one";
+    const firstAuthority: NativePresenceAuthority = {
+      actor,
+      sessionId: "session-one",
+      isAuthorized: () => currentSessionId === "session-one",
+    };
+    const secondAuthority: NativePresenceAuthority = {
+      actor,
+      sessionId: "session-two",
+      isAuthorized: () => currentSessionId === "session-two",
+    };
+    const thirdAuthority: NativePresenceAuthority = {
+      actor,
+      sessionId: "session-three",
+      isAuthorized: () => currentSessionId === "session-three",
+    };
+    const emit = vi.fn();
+    const presence = createNativeRoomPresence({ emit });
+    presence.subscribe("first-observer", room, firstAuthority);
+    presence.update("actor-tab", room, firstAuthority, online);
+
+    currentSessionId = "session-two";
+    presence.subscribe("second-observer", room, secondAuthority);
+    expect(presence.snapshot(room, secondAuthority)).toMatchObject({
+      inventoryStatus: "complete",
+      connections: [],
+    });
+    expect(emit.mock.lastCall?.[1]).toEqual(new Set());
+    presence.update("actor-tab", room, secondAuthority, online);
+    expect(presence.snapshot(room, secondAuthority).connections).toEqual([
+      expect.objectContaining({ state: "online" }),
+    ]);
+    presence.disconnect("actor-tab", true);
+    expect(presence.snapshot(room, secondAuthority).connections).toEqual([
+      expect.objectContaining({ state: "offline" }),
+    ]);
+
+    currentSessionId = "session-three";
+    expect(presence.snapshot(room, thirdAuthority)).toMatchObject({
+      inventoryStatus: "complete",
+      connections: [],
+    });
     presence.stop();
   });
 });
@@ -244,7 +305,13 @@ describe("native presence Gateway requests", () => {
       undefined,
       expect.objectContaining({ code: "INVALID_REQUEST" }),
     );
-    expect(presence.snapshot(room).connections).toEqual([]);
+    expect(
+      presence.snapshot(room, {
+        actor: { type: "profile", id: "server-profile" },
+        sessionId: "session-room",
+        isAuthorized: () => true,
+      }).connections,
+    ).toEqual([]);
     const heartbeat = await call("heartbeat", {
       sessionKey: room,
       visibility: "visible",

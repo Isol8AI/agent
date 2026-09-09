@@ -69,10 +69,17 @@ export function hasSessionReadAccessChanged(
   );
 }
 
-export function isGatewayAdmin(client: Pick<GatewayClient, "connect"> | null): boolean {
+export function isGatewayAdmin(
+  client: Pick<GatewayClient, "connect" | "internal"> | null,
+): boolean {
   // Internal/plugin-runtime runs reach authorization with a client that has no
   // connect handshake; treat a connect-less client as a non-admin, never a crash.
-  return client?.connect?.scopes?.includes("operator.admin") === true;
+  // Trusted human brokers need this transport scope for file CAS, but their
+  // authenticated profile and typed room membership remain the room authority.
+  return (
+    client?.connect?.scopes?.includes("operator.admin") === true &&
+    client.internal?.trustedHumanBroker !== true
+  );
 }
 
 export function allowedSessionVisibilities(cfg: OpenClawConfig): SessionVisibility[] {

@@ -274,8 +274,12 @@ test("restricted reads require typed membership and never trust participant hist
       },
     },
   };
-  const readFor = async (profileId: string) => {
+  const readFor = async (profileId: string, trustedHumanBroker = false) => {
     const client = identifiedClient(profileId);
+    if (trustedHumanBroker) {
+      client.connect.scopes = ["operator.admin"];
+      client.internal = { trustedHumanBroker: true };
+    }
     const options = { client, context: { getRuntimeConfig: () => cfg } };
     return {
       searched: await directSessionReq<{ results: Array<{ sessionKey: string }> }>(
@@ -316,8 +320,12 @@ test("restricted reads require typed membership and never trust participant hist
     };
   };
 
-  for (const profileId of [participantId, outsiderId]) {
-    const hidden = await readFor(profileId);
+  for (const [profileId, trustedHumanBroker] of [
+    [participantId, false],
+    [outsiderId, false],
+    [outsiderId, true],
+  ] as const) {
+    const hidden = await readFor(profileId, trustedHumanBroker);
     expect(hidden.searched.payload?.results).toEqual([]);
     expect(hidden.listed.sessions.some((session) => session.key === sessionKey)).toBe(false);
     expect(hidden.listed).toMatchObject({ count: 1, totalCount: 1, nextOffset: null });
@@ -350,6 +358,13 @@ test("restricted reads require typed membership and never trust participant hist
   expect(visible.history.payload?.messages.map((message) => message.content)).toEqual([
     "restricted search needle",
   ]);
+  const visibleBroker = await readFor(memberId, true);
+  expect(visibleBroker.searched.payload?.results.map((result) => result.sessionKey)).toEqual([
+    sessionKey,
+  ]);
+  expect(
+    visibleBroker.listedAll.sessions.find((session) => session.key === sessionKey),
+  ).toMatchObject({ visibility: "restricted", sharingRole: "member" });
 
   const respond = vi.fn();
   const previewHandler = sessionReadHandlers["sessions.preview"];

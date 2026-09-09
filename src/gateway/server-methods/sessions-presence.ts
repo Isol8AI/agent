@@ -64,7 +64,7 @@ function presenceHandler(
           recentInput: params.recentInput,
         });
       }
-      respond(true, presence.snapshot(roomKey));
+      respond(true, presence.snapshot(roomKey, authority));
     } catch {
       // Authorization/producer failure never becomes an authoritative empty snapshot.
       respond(

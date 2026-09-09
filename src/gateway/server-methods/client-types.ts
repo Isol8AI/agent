@@ -60,6 +60,8 @@ export type GatewayClient = {
     isLocalClient?: true;
     /** Authenticated Control UI admin admission; never accepted from wire params. */
     controlUiAdmin?: true;
+    /** Handshake-attested human broker whose transport admin scope is not room authority. */
+    trustedHumanBroker?: true;
     /** Marks the server-constructed client used by trusted in-process dispatch. */
     syntheticClient?: true;
     /** Host-owned role authority retained separately from an autonomous run principal. */
