@@ -157,6 +157,8 @@ const repositoryScriptEntries = [
   // Native shell UI tests connect to this manually launched loopback Gateway fixture.
   "scripts/test-ios-shell-gateway.mjs!",
   "scripts/update-clawtributors.ts!",
+  // Focused evidence harnesses launch this retained candidate verifier by path.
+  "scripts/verify-authorized-beta-focused-candidate.mjs!",
   // The candidate binder invokes this trusted producer-identity verifier by path.
   "scripts/verify-full-release-producer-job.mjs!",
   // Staging and signed-app packaging execute this verifier with each bundled Node.
