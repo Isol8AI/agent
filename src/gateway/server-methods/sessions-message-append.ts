@@ -40,7 +40,12 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
   signal,
 }) => {
   if (
-    !assertValidParams(params, validateSessionMessageAppendParams, "sessions.message.append", respond)
+    !assertValidParams(
+      params,
+      validateSessionMessageAppendParams,
+      "sessions.message.append",
+      respond,
+    )
   ) {
     return;
   }
@@ -121,8 +126,7 @@ export const appendSessionMessage: GatewayRequestHandler = async ({
           client,
           sessionKey: scope.sessionKey,
           target: current,
-        }) ??
-        authorizeSessionSharingTarget({ cfg: currentCfg, client, target: current });
+        }) ?? authorizeSessionSharingTarget({ cfg: currentCfg, client, target: current });
       if (accessError) {
         throw new SessionMutationAuthorizationChangedError(accessError);
       }

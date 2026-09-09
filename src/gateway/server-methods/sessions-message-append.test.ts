@@ -291,11 +291,13 @@ describe("sessions.message.append", () => {
         originRootMessageId: root.messageId,
       });
       expect(
-        (await invoke({
-          sessionKey: child.sessionKey,
-          expectedSessionId: child.sessionId,
-          replyToId: root.messageId,
-        }))[0],
+        (
+          await invoke({
+            sessionKey: child.sessionKey,
+            expectedSessionId: child.sessionId,
+            replyToId: root.messageId,
+          })
+        )[0],
       ).toBe(false);
       const childMessage = receipt(
         await invoke({ sessionKey: child.sessionKey, expectedSessionId: child.sessionId }),
@@ -311,67 +313,75 @@ describe("sessions.message.append", () => {
     });
   });
 
-  it.each(["profile", "agent"] as const)("projects stored %s identity and reply metadata identically in live/history", async (type) => {
-    await withOpenClawTestState({ label: "message-append-projection" }, async (state) => {
-      await state.writeConfig(cfg);
-      await seedRoom();
-      const root = receipt(await invoke());
-      const client = type === "agent" ? agentClient() : identifiedClient("member");
-      client.internal = {
-        ...client.internal,
-        senderAttribution: { id: "forged", identity: { type: "profile", id: "forged" } },
-      };
-      const updates: Parameters<typeof projectSessionMessagePayload>[0][] = [];
-      const unsubscribe = onInternalSessionTranscriptUpdate((update) => {
-        if (update.sessionKey && update.messageId) {
-          updates.push({ ...update, sessionKey: update.sessionKey, message: update.message });
+  it.each(["profile", "agent"] as const)(
+    "projects stored %s identity and reply metadata identically in live/history",
+    async (type) => {
+      await withOpenClawTestState({ label: "message-append-projection" }, async (state) => {
+        await state.writeConfig(cfg);
+        await seedRoom();
+        const root = receipt(await invoke());
+        const client = type === "agent" ? agentClient() : identifiedClient("member");
+        client.internal = {
+          ...client.internal,
+          senderAttribution: { id: "forged", identity: { type: "profile", id: "forged" } },
+        };
+        const updates: Parameters<typeof projectSessionMessagePayload>[0][] = [];
+        const unsubscribe = onInternalSessionTranscriptUpdate((update) => {
+          if (update.sessionKey && update.messageId) {
+            updates.push({ ...update, sessionKey: update.sessionKey, message: update.message });
+          }
+        });
+        try {
+          const appended = receipt(
+            await invoke({ idempotencyKey: "reply", replyToId: root.messageId }, client),
+          );
+          const event = loadTranscriptEventsSync(scope).find(
+            (row) => readTranscriptEventId(row) === appended.messageId,
+          );
+          const history = projectChatDisplayMessage(
+            projectTranscriptEntryMessage(event, appended.messageSeq),
+          );
+          const live = projectSessionMessagePayload(updates[0]!).payload?.message;
+          for (const projection of [history, live]) {
+            const senderIdentity = { type, id: type === "agent" ? "helper" : "member" };
+            const metadata = asOptionalRecord(asOptionalRecord(projection)?.["__openclaw"]);
+            expect(readTranscriptSenderIdentity(metadata?.senderIdentity)).toEqual(senderIdentity);
+            expect(projection).toMatchObject({
+              timestamp: readTranscriptEventMessage(event)?.timestamp,
+              __openclaw: {
+                id: appended.messageId,
+                seq: appended.messageSeq,
+                replyToId: root.messageId,
+                senderIdentity,
+              },
+            });
+          }
+          if (type === "agent") {
+            expect(
+              receipt(
+                await invoke(
+                  {
+                    idempotencyKey: "model-changed-key",
+                    replyToId: root.messageId,
+                  },
+                  client,
+                ),
+              ),
+            ).toEqual({ ...appended, appended: false });
+            expect(
+              (await invoke({ idempotencyKey: "another-key", text: "Another result" }, client))[0],
+            ).toBe(false);
+            removeSessionMember(scope, { type: "agent", id: "helper" }, undefined, scope.sessionId);
+            expect((await invoke({}, client))[0]).toBe(false);
+            rotateAgentRunRegistryLifecycleGeneration();
+            expect((await invoke({}, client))[0]).toBe(false);
+          }
+        } finally {
+          unsubscribe();
         }
       });
-      try {
-        const appended = receipt(
-          await invoke({ idempotencyKey: "reply", replyToId: root.messageId }, client),
-        );
-        const event = loadTranscriptEventsSync(scope).find(
-          (row) => readTranscriptEventId(row) === appended.messageId,
-        );
-        const history = projectChatDisplayMessage(
-          projectTranscriptEntryMessage(event, appended.messageSeq),
-        );
-        const live = projectSessionMessagePayload(updates[0]!).payload?.message;
-        for (const projection of [history, live]) {
-          const senderIdentity = { type, id: type === "agent" ? "helper" : "member" };
-          const metadata = asOptionalRecord(asOptionalRecord(projection)?.["__openclaw"]);
-          expect(readTranscriptSenderIdentity(metadata?.senderIdentity)).toEqual(senderIdentity);
-          expect(projection).toMatchObject({
-            timestamp: readTranscriptEventMessage(event)?.timestamp,
-            __openclaw: {
-              id: appended.messageId,
-              seq: appended.messageSeq,
-              replyToId: root.messageId,
-              senderIdentity,
-            },
-          });
-        }
-        if (type === "agent") {
-          expect(
-            receipt(await invoke({
-              idempotencyKey: "model-changed-key",
-              replyToId: root.messageId,
-            }, client)),
-          ).toEqual({ ...appended, appended: false });
-          expect(
-            (await invoke({ idempotencyKey: "another-key", text: "Another result" }, client))[0],
-          ).toBe(false);
-          removeSessionMember(scope, { type: "agent", id: "helper" }, undefined, scope.sessionId);
-          expect((await invoke({}, client))[0]).toBe(false);
-          rotateAgentRunRegistryLifecycleGeneration();
-          expect((await invoke({}, client))[0]).toBe(false);
-        }
-      } finally {
-        unsubscribe();
-      }
-    });
-  });
+    },
+  );
 
   it("authorizes persistence while restricted-room execution remains unavailable", async () => {
     await withOpenClawTestState({ label: "message-append-policy" }, async (state) => {
@@ -383,7 +393,8 @@ describe("sessions.message.append", () => {
         requestParams: params,
       };
       expect(
-        resolveSessionMutationAuthorization({ ...options, method: "sessions.message.append" }).error,
+        resolveSessionMutationAuthorization({ ...options, method: "sessions.message.append" })
+          .error,
       ).toBeNull();
       expect(
         resolveSessionMutationAuthorization({ ...options, method: "chat.send" }).error?.details,
