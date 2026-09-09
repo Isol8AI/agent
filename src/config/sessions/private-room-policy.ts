@@ -1,5 +1,7 @@
 import path from "node:path";
+import { normalizeAgentIdStrict } from "@openclaw/normalization-core/agent-id";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
+import { resolveStateDir } from "../paths.js";
 import type { OpenClawConfig } from "../types.openclaw.js";
 import { resolveSessionStorePathCore } from "./paths.js";
 import { resolveSessionEntry } from "./session-accessor.sqlite-entry.js";
@@ -16,6 +18,29 @@ export const PRIVATE_ROOM_CAPABILITIES = Object.freeze([
   "gateway:sessions.files.reveal",
   "gateway:sessions.execution.dispatch",
 ]);
+
+const PRIVATE_ROOM_SESSION_ID_RE = /^[a-z0-9][a-z0-9_-]{0,127}$/iu;
+
+export function resolvePrivateRoomSessionRoot(params: {
+  agentId: string;
+  sessionId: string;
+  stateDir?: string;
+}): string {
+  const agentId = normalizeAgentIdStrict(params.agentId);
+  if (
+    !agentId.ok ||
+    agentId.value !== params.agentId ||
+    !PRIVATE_ROOM_SESSION_ID_RE.test(params.sessionId)
+  ) {
+    throw new Error("Private room storage identity is invalid");
+  }
+  return path.join(
+    path.resolve(params.stateDir ?? resolveStateDir()),
+    "private-rooms",
+    agentId.value,
+    params.sessionId,
+  );
+}
 
 /** Missing or malformed private policy never falls back to an agent workspace. */
 export function privateRoomPolicyForEntry(
