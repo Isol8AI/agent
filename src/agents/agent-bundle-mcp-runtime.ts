@@ -13,6 +13,7 @@ import {
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { logWarn } from "../logger.js";
+import { parseAgentSessionKey } from "../routing/session-key.js";
 import {
   createCombinedSessionMcpRuntime,
   mergeMcpToolCatalogs,
@@ -238,6 +239,103 @@ function createDisposedError(sessionId: string): Error {
 
 type ServerMcpRuntime = SessionMcpRuntime & { readonly pluginOwned: boolean };
 
+const sharedServers = new Map<string, { runtime: ServerMcpRuntime; owners: number }>();
+
+function acquireServerRuntime(
+  params: Parameters<typeof createServerMcpRuntime>[0],
+): ServerMcpRuntime {
+  const agentId = parseAgentSessionKey(params.sessionKey)?.agentId;
+  if (
+    params.cfg?.mcp?.runtimeScope !== "shared" ||
+    !agentId ||
+    !params.agentDir ||
+    params.requesterScope ||
+    params.cfg.mcp.apps?.enabled === true
+  ) {
+    return createServerMcpRuntime(params);
+  }
+  const key = JSON.stringify([
+    agentId,
+    params.workspaceDir,
+    params.agentDir,
+    params.serverName,
+    params.configFingerprint,
+  ]);
+  const shared = sharedServers.get(key) ?? { runtime: createServerMcpRuntime(params), owners: 0 };
+  sharedServers.set(key, shared);
+  shared.owners++;
+  const owners = new Map([[params.serverName, shared.runtime]]);
+  const view = createCombinedSessionMcpRuntime({
+    ...params,
+    parts: [shared.runtime],
+    serverOwners: owners,
+  });
+  let disposed = false;
+  let retiredCatalog: McpToolCatalog | undefined;
+  let cleanup: Promise<void> | undefined;
+  let leases = 0;
+  Object.defineProperty(view, "activeLeases", { get: () => leases });
+  Object.defineProperty(view, "retiredCatalog", { get: () => retiredCatalog });
+  view.acquireLease = () => {
+    if (disposed) {
+      throw createDisposedError(params.sessionId);
+    }
+    leases++;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        leases--;
+      }
+    };
+  };
+  const getCatalog = view.getCatalog;
+  const peekCatalog = view.peekCatalog;
+  view.getCatalog = async () => {
+    if (disposed) {
+      throw createDisposedError(params.sessionId);
+    }
+    return getCatalog();
+  };
+  view.peekCatalog = () => (disposed ? null : peekCatalog());
+  view.dispose = async () => {
+    if (!disposed) {
+      disposed = true;
+      retiredCatalog = {
+        version: 1,
+        generatedAt: Date.now(),
+        servers: {},
+        tools: [],
+        diagnostics: [
+          {
+            serverName: params.serverName,
+            launchSummary: params.serverName,
+            safeServerName:
+              params.safeServerNamesByServer?.get(params.serverName) ?? params.serverName,
+            message: "MCP server runtime retired; retry discovery on the next turn.",
+          },
+        ],
+      };
+      owners.clear();
+      if (--shared.owners === 0) {
+        if (sharedServers.get(key) === shared) {
+          sharedServers.delete(key);
+        }
+        cleanup = (async () => {
+          await shared.runtime.dispose();
+          await shared.runtime.joinCleanup?.();
+        })();
+      }
+    }
+    await cleanup;
+  };
+  view.joinCleanup = async () => {
+    await cleanup;
+  };
+  view.configFingerprint = shared.runtime.configFingerprint;
+  return Object.assign(view, { pluginOwned: shared.runtime.pluginOwned });
+}
+
 export function createSessionMcpRuntime(
   params: Parameters<CreateSessionMcpRuntime>[0],
   previous = new Map<string, ServerMcpRuntime>(),
@@ -294,7 +392,7 @@ export function createSessionMcpRuntime(
     } else {
       owned.set(
         serverName,
-        createServerMcpRuntime({
+        acquireServerRuntime({
           ...params,
           serverName,
           serverConfig,

@@ -46,6 +46,7 @@ const CACHE_TTL_IMAGE_MARKER = "[image removed during context pruning]";
 const CACHE_TTL_DEFAULT_PLACEHOLDER = "[Old tool result content cleared]";
 
 type CacheTtlPruningSettings = {
+  mode: "cache-ttl" | "size";
   ttlMs: number;
   hardClear: boolean;
   placeholder: string;
@@ -57,7 +58,7 @@ const TOOL_RESULT_PROJECTION_KEY = Symbol("toolResultProjectionKey");
 export function resolveCacheTtlPruningSettings(
   config: AgentContextPruningConfig | undefined,
 ): CacheTtlPruningSettings | undefined {
-  if (config?.mode !== "cache-ttl") {
+  if (config?.mode !== "cache-ttl" && config?.mode !== "size") {
     return undefined;
   }
   let ttlMs = 5 * 60_000;
@@ -70,6 +71,7 @@ export function resolveCacheTtlPruningSettings(
   const deny = compileGlobPatterns({ raw: config.tools?.deny, normalize });
   const allow = compileGlobPatterns({ raw: config.tools?.allow, normalize });
   return {
+    mode: config.mode,
     ttlMs,
     hardClear: config.hardClear?.enabled ?? true,
     placeholder: config.hardClear?.placeholder?.trim() || CACHE_TTL_DEFAULT_PLACEHOLDER,
@@ -216,9 +218,10 @@ export function pruneExpiredCacheTtlToolResults(params: {
   });
   if (
     !params.pruneNewRounds ||
-    !params.lastCacheTouchAt ||
-    settings.ttlMs <= 0 ||
-    params.now - params.lastCacheTouchAt < settings.ttlMs
+    (settings.mode === "cache-ttl" &&
+      (!params.lastCacheTouchAt ||
+        settings.ttlMs <= 0 ||
+        params.now - params.lastCacheTouchAt < settings.ttlMs))
   ) {
     return next ?? unchanged;
   }

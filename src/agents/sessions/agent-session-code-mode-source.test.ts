@@ -22,7 +22,12 @@ import { createMockPluginRegistry } from "../../plugins/hooks.test-helpers.js";
 import { createNestedToolActivity } from "../../sessions/nested-tool-activity.js";
 import { closeOpenClawAgentDatabaseByPath } from "../../state/openclaw-agent-db.js";
 import { toToolDefinitions } from "../agent-tool-definition-adapter.js";
-import { isCodeModeExecTool } from "../code-mode-control-tools.js";
+import { createExecTool } from "../bash-tools.exec-run.js";
+import {
+  copyCodeModeControlToolIdentity,
+  isCodeModeExecTool,
+  isNativeShellTool,
+} from "../code-mode-control-tools.js";
 import { createCodeModeHarness, resetCodeModeTestState } from "../code-mode.test-support.js";
 import { wrapStreamFnWithDiagnosticModelCallEvents } from "../embedded-agent-runner/run/attempt.model-diagnostic-events.js";
 import type { AgentMessage } from "../runtime/index.js";
@@ -50,6 +55,84 @@ afterEach(() => {
 });
 
 describe("AgentSession runtime and transcript projections", () => {
+  it.each([true, false])(
+    "requires native shell ownership through SQLite replay (owned=%s)",
+    async (owned) => {
+      const dir = tempDirs.make("openclaw-shell-source-projection-");
+      const scope = {
+        agentId: "main",
+        sessionId: "shell-projection",
+        sessionKey: "agent:main:shell-projection",
+        storePath: path.join(dir, "sessions.json"),
+      };
+      await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
+      const manager = SessionManager.open(scope, dir);
+      guardSessionManager(manager, { allowedToolNames: ["exec"] });
+      const command = 'curl -H "Authorization: Bearer ${TOKEN:-}" -H "X-Api-Key: $(printenv KEY)"';
+      let executed: unknown;
+      const tool: ToolDefinition = {
+        name: "exec",
+        label: "exec",
+        description: "Synthetic shell owner fixture",
+        parameters: Type.Object({ command: Type.String() }),
+        execute: async (_id, args) => {
+          executed = args;
+          return {
+            content: [{ type: "text", text: "fixture only; no shell was executed" }],
+            details: {},
+          };
+        },
+      };
+      if (owned) {
+        copyCodeModeControlToolIdentity(createExecTool(), tool);
+      }
+      streamMocks.streamSimple
+        .mockImplementationOnce((model: Model) =>
+          createAssistantResultStream(
+            createAssistant(
+              model,
+              [{ type: "toolCall", id: "shell_call", name: "exec", arguments: { command } }],
+              "toolUse",
+            ),
+          ),
+        )
+        .mockImplementation((model: Model) =>
+          createAssistantResultStream(createAssistant(model, [{ type: "text", text: "Done." }])),
+        );
+      const { session } = await createTestSession({ sessionManager: manager, customTools: [tool] });
+      session.agent.streamFn = wrapStreamFnCodeModeSource(
+        session.agent.streamFn!,
+        new Set(),
+        new Set(isNativeShellTool(tool) ? [tool.name] : []),
+      );
+      await session.prompt("Use the synthetic test tool.");
+      expect(executed).toEqual({ command });
+      session.dispose();
+      expect(
+        closeOpenClawAgentDatabaseByPath(
+          resolveSqliteTargetFromSessionStorePath(scope.storePath).path!,
+        ),
+      ).toBe(true);
+      const reopened = SessionManager.open(scope, dir);
+      const { session: next } = await createTestSession({
+        sessionManager: reopened,
+        customTools: [tool],
+      });
+      await next.prompt("Recall the prior command.");
+      const context = streamMocks.streamSimple.mock.calls.at(-1)![1];
+      const serialized = JSON.stringify(context.messages);
+      if (owned) {
+        expect(serialized).toContain("${TOKEN:-}");
+        expect(serialized).toContain("$(printenv KEY)");
+      } else {
+        expect(serialized).not.toContain("${TOKEN:-}");
+        expect(serialized).not.toContain("$(printenv KEY)");
+      }
+      expect(serialized).not.toContain("sourceSlots");
+      next.dispose();
+    },
+  );
+
   const source =
     "function computeToken() { return 42; }\nconst API_TOKEN = computeToken(); return API_TOKEN;";
   const genericLiteral = "fixture-only-not-a-real-secret";

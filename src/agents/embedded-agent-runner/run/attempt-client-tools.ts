@@ -9,7 +9,7 @@ import {
 } from "../../agent-tool-definition-adapter.js";
 import { wrapToolWithAbortSignal } from "../../agent-tools.abort.js";
 import { resolveToolLoopDetectionConfig } from "../../agent-tools.js";
-import { isCodeModeExecTool } from "../../code-mode-control-tools.js";
+import { isCodeModeExecTool, isNativeShellTool } from "../../code-mode-control-tools.js";
 import { addClientToolsToCodeModeCatalog } from "../../code-mode.js";
 import type { AgentTool } from "../../runtime/index.js";
 import {
@@ -131,6 +131,9 @@ export function prepareEmbeddedAttemptClientTools(params: {
     // Only the marked Code Mode exec owns a resumable run; a plain shell exec of
     // the same name must never be mistaken for one at tool completion. The marked
     // controls exist only on the post-catalog `effectiveTools` surface.
+    const shellExecToolNames = new Set(
+      params.effectiveTools.filter(isNativeShellTool).map((tool) => tool.name),
+    );
     const codeModeExecToolNames = new Set(
       params.effectiveTools.filter((tool) => isCodeModeExecTool(tool)).map((tool) => tool.name),
     );
@@ -203,6 +206,7 @@ export function prepareEmbeddedAttemptClientTools(params: {
       replaySafeToolNames,
       replaySafeTools,
       codeModeExecToolNames,
+      shellExecToolNames,
       sideEffectToolOwners,
       sessionToolAllowlist,
     };
@@ -224,6 +228,7 @@ export function prepareEmbeddedAttemptClientTools(params: {
         "coreBuiltinToolNames",
         "replaySafeToolNames",
         "codeModeExecToolNames",
+        "shellExecToolNames",
       ] as const) {
         current[key].clear();
         for (const name of next[key]) {

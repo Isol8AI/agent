@@ -33,6 +33,7 @@ import type {
 import {
   loadGatewaySessionStoreReads,
   readGatewaySessionStore,
+  SessionLookupUnavailableError,
   type GatewaySessionStoreRead,
   type GatewaySessionStoreCache,
 } from "./session-utils-store-read.js";
@@ -470,8 +471,8 @@ function includeDirectChildEntries(
         target.store[sessionKey] = entry;
       }
     }
-  } catch {
-    // Match the existing read-only lookup contract: unavailable stores degrade to no rows.
+  } catch (error) {
+    throw new SessionLookupUnavailableError(error);
   }
   return target;
 }

@@ -3074,6 +3074,7 @@ describe("openclaw agent database", () => {
     });
 
     expect(() => closeOpenClawAgentDatabaseByPath(database.path)).toThrow("wal close failed");
+    expect(close).toHaveBeenCalledWith({ checkpointMode: "PASSIVE" });
     expect(database.db.isOpen).toBe(true);
     expect(() => assertNoOpenClawAgentDatabaseLeases("worker-1", { env })).toThrow(
       "database is still open",

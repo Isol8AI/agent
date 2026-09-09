@@ -25,6 +25,14 @@ type CodeModeExecHookMetadata = {
 };
 
 const codeModeControlTools = new WeakSet<object>();
+const nativeShellTools = new WeakSet<object>();
+export function markNativeShellTool<T extends object>(tool: T): T {
+  nativeShellTools.add(tool);
+  return tool;
+}
+export function isNativeShellTool(tool: object): boolean {
+  return nativeShellTools.has(tool);
+}
 type CodeModeExecDescriptionTarget = Pick<AnyAgentTool, "description">;
 type CodeModeExecDescriptionState = {
   description: string;
@@ -46,6 +54,9 @@ export function copyCodeModeControlToolIdentity(
   original: object,
   wrapper: CodeModeExecDescriptionTarget,
 ): void {
+  if (nativeShellTools.has(original)) {
+    nativeShellTools.add(wrapper);
+  }
   if (codeModeControlTools.has(original)) {
     codeModeControlTools.add(wrapper);
     const descriptionState = codeModeExecDescriptionTargets.get(original)?.state;

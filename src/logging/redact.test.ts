@@ -260,6 +260,26 @@ describe("model-visible tool payload redaction", () => {
 });
 
 describe("redactSensitiveText", () => {
+  it.each(
+    [": ", "="].flatMap((separator) =>
+      ["prefix", "credential"].flatMap((crossing) =>
+        [false, true].map((unicode) => ({ separator, crossing, unicode })),
+      ),
+    ),
+  )(
+    "masks complete gateway headers across chunk boundaries ($separator $crossing $unicode)",
+    ({ separator, crossing, unicode }) => {
+      const header = `X-Api-Key${separator}`;
+      const secret = ["gw", "api", "key", "0123456789abcdefghij"].join("-");
+      const headerStart = 16_384 - (crossing === "prefix" ? 5 : header.length + 12);
+      const lead = unicode ? "🦞" : "";
+      const prefix = lead + "x".repeat(headerStart - lead.length - 1) + " ";
+      const suffix = " " + "y".repeat(32_768);
+      expect(redactSensitiveText(prefix + header + secret + suffix, { mode: "tools" })).toBe(
+        prefix + header + "gw-api…ghij" + suffix,
+      );
+    },
+  );
   it("preserves long blank runs without stalling the default redaction scan", () => {
     const input = `<details>a${"\n".repeat(60_000)}X</details>`;
     const started = performance.now();

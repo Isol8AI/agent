@@ -1,13 +1,13 @@
 import path from "node:path";
-import { resolveAgentDir } from "../../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveWorkshopAgentRoot } from "./agent-root.js";
 
 export function resolveWorkshopSkillsDir(
-  config: OpenClawConfig,
+  _config: OpenClawConfig,
   agentId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return path.join(resolveAgentDir(config, agentId, env), "workshop-skills");
+  return path.join(resolveWorkshopAgentRoot(agentId, env), "skills");
 }
 
 export function resolveWorkshopWatchRoots(config?: OpenClawConfig, agentId?: string) {

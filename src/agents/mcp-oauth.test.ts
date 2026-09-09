@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import path from "node:path";
 import { withTempHome as withBaseTempHome } from "openclaw/plugin-sdk/test-env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resolveStateDir } from "../config/paths.js";
 import type { McpServerConfig } from "../config/types.mcp.js";
 import { handleMcpOAuthCallback } from "../gateway/mcp-oauth-callback.js";
 import { createRequest, createResponse } from "../gateway/server-http.test-harness.js";
@@ -42,6 +43,50 @@ const LEGACY_ACCESS = "example";
 const REMOTE_IDENTITY = operatorMcpOAuthIdentity("Remote Docs", "https://mcp.example.com/mcp");
 const CALENDLY_IDENTITY = operatorMcpOAuthIdentity("Calendly", "https://mcp.calendly.com/");
 const REQUESTER_SCOPE = { messageChannel: "telegram", agentAccountId: "bot" } as const;
+
+it("imports external operator seeds at resolution without crossing server or requester identities", async () => {
+  await withTempHome(
+    async () => {
+      const seedDir = path.join(resolveStateDir(), "mcp-oauth");
+      await fs.mkdir(seedDir, { recursive: true });
+      const other = operatorMcpOAuthIdentity("Other Agent Docs", REMOTE_IDENTITY.serverUrl);
+      await saveAccessToken(REMOTE_IDENTITY, "fixture-stale-token");
+      await saveAccessToken(other, "fixture-other-agent-token");
+      const seed = {
+        ...readMcpOAuthStore(REMOTE_IDENTITY.storeKey),
+        tokens: { access_token: "fixture-new-seed-token", token_type: "Bearer", expires_in: 3600 },
+      };
+      const seedPath = path.join(seedDir, REMOTE_IDENTITY.storeKey + ".json");
+      await fs.writeFile(seedPath, JSON.stringify(seed));
+      expect(await resolveMcpOAuthAccessToken({ identity: other })).toBe(
+        "fixture-other-agent-token",
+      );
+      expect(await fs.readFile(seedPath, "utf8")).toContain("fixture-new-seed-token");
+      expect(await resolveMcpOAuthAccessToken({ identity: REMOTE_IDENTITY })).toBe(
+        "fixture-new-seed-token",
+      );
+      await expect(fs.access(seedPath)).rejects.toHaveProperty("code", "ENOENT");
+      const requester = requesterIdentity(
+        REMOTE_IDENTITY.serverName,
+        REMOTE_IDENTITY.serverUrl,
+        "alice",
+      );
+      expect(
+        await resolveMcpOAuthAccessToken({ identity: requester, allowMissingToken: true }),
+      ).not.toBe("fixture-new-seed-token");
+      await fs.writeFile(seedPath, "{malformed");
+      expect(await resolveMcpOAuthAccessToken({ identity: REMOTE_IDENTITY })).toBe(
+        "fixture-new-seed-token",
+      );
+      expect(await fs.readFile(seedPath, "utf8")).toBe("{malformed");
+    },
+    {
+      prefix: "openclaw-oauth-seed-",
+      skipSessionCleanup: true,
+      env: { OPENCLAW_CONFIG_PATH: undefined, OPENCLAW_STATE_DIR: undefined },
+    },
+  );
+});
 
 function requesterIdentity(serverName: string, serverUrl: string, requesterSenderId: string) {
   return requesterMcpOAuthIdentity(serverName, serverUrl, {

@@ -43,6 +43,7 @@ function digestMcpToolDenials(
 function createCatalogFingerprint(params: {
   servers: Record<string, unknown>;
   mcpAppsEnabled: boolean;
+  runtimeScope: "session" | "shared";
   /** Full-set server→safeName map; assignment changes must invalidate all partitions. */
   safeServerNames?: Record<string, string>;
   mcpToolsDeny?: Record<string, string[]>;
@@ -132,6 +133,7 @@ export function loadSessionMcpConfig(params: {
     fingerprint: createCatalogFingerprint({
       servers: fingerprintServers,
       mcpAppsEnabled,
+      runtimeScope: params.cfg?.mcp?.runtimeScope === "shared" ? "shared" : "session",
       ...(safeServerNames ? { safeServerNames } : {}),
       mcpToolsDeny,
     }),

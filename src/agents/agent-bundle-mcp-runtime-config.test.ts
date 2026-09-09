@@ -33,6 +33,18 @@ afterEach(() => {
 });
 
 describe("session MCP config projection", () => {
+  it("invalidates ownership when shared scope changes", () => {
+    const params = {
+      workspaceDir: "/scope-workspace",
+      cfg: { mcp: { servers: { probe: { command: "probe" } } } },
+    };
+    const session = loadSessionMcpConfig(params);
+    const shared = loadSessionMcpConfig({
+      ...params,
+      cfg: { mcp: { ...params.cfg.mcp, runtimeScope: "shared" } },
+    });
+    expect(shared.fingerprint).not.toBe(session.fingerprint);
+  });
   it("keeps Agent Plugins launch ownership out of fingerprints and filtered partitions", () => {
     const cfg = {
       mcp: { servers: { alpha: { command: "alpha" }, beta: { command: "beta" } } },

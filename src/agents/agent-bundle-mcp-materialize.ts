@@ -427,6 +427,8 @@ export async function materializeBundleMcpToolsForRun(params: {
   /** Transfer the lease admitted by the manager before returning this runtime. */
   releaseLease?: () => void;
   disposeRuntime?: () => Promise<void>;
+  /** Run preparation may warm a cold catalog without delaying built-in tools. */
+  nonBlocking?: boolean;
 }): Promise<BundleMcpToolRuntime> {
   const runtime = params.runtime;
   let disposal: Promise<void> | undefined;
@@ -462,7 +464,19 @@ export async function materializeBundleMcpToolsForRun(params: {
   try {
     releaseLease = params.releaseLease ?? runtime.acquireLease?.();
     runtime.markUsed();
-    const catalog = await runtime.getCatalog();
+    let catalog = params.nonBlocking ? runtime.peekCatalog() : await runtime.getCatalog();
+    if (!catalog) {
+      const releaseWarmLease = runtime.acquireLease?.();
+      void runtime
+        .getCatalog()
+        .catch(() => undefined)
+        .finally(async () => {
+          const { releaseSessionMcpRuntime } = await import("./agent-bundle-mcp-manager-api.js");
+          await releaseSessionMcpRuntime({ runtime, releaseLease: releaseWarmLease });
+        })
+        .catch(() => recordAgentCleanupFailure());
+      catalog = { version: 1, generatedAt: Date.now(), servers: {}, tools: [] };
+    }
     const reservedToolNames = params.reservedToolNames
       ? Array.from(params.reservedToolNames)
       : undefined;

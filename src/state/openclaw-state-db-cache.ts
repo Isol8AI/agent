@@ -69,7 +69,7 @@ function closeOpenClawStateDatabaseHandle(
 ): unknown[] {
   const errors: unknown[] = [];
   try {
-    database.walMaintenance.close(options);
+    database.walMaintenance.close({ checkpointMode: "PASSIVE", ...options });
   } catch (error) {
     errors.push(error);
   }
@@ -188,7 +188,7 @@ function closeStaleCachedOpenClawStateDatabase(database: OpenClawStateDatabase):
   if (cachedDatabases.get(database.path) !== database) {
     return;
   }
-  database.walMaintenance.close();
+  database.walMaintenance.close({ checkpointMode: "PASSIVE" });
   clearNodeSqliteKyselyCacheForDatabase(database.db);
   cachedDatabases.delete(database.path);
   notifyOpenClawStateDatabaseLifecycle({ kind: "closed", path: database.path });
@@ -252,7 +252,7 @@ export function closeOpenClawStateDatabaseByPath(pathname: string): boolean {
   if (!database) {
     return false;
   }
-  database.walMaintenance.close();
+  database.walMaintenance.close({ checkpointMode: "PASSIVE" });
   if (database.db.isOpen) {
     database.db.close();
   }
@@ -266,7 +266,7 @@ export function closeOpenClawStateDatabase(
   options?: Parameters<OpenClawStateDatabase["walMaintenance"]["close"]>[0],
 ): void {
   for (const database of cachedDatabases.values()) {
-    database.walMaintenance.close(options);
+    database.walMaintenance.close({ checkpointMode: "PASSIVE", ...options });
     if (database.db.isOpen) {
       database.db.close();
     }

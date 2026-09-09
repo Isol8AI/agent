@@ -84,8 +84,9 @@ export const AWS_SECRET_ACCESS_KEY_VALUE_PATTERN = String.raw`(?=[A-Za-z0-9/+=]{
 const AWS_SECRET_ACCESS_KEY_VALUE_REDACT_PATTERN = String.raw`/${AWS_SECRET_ACCESS_KEY_VALUE_BOUNDARY}(${AWS_SECRET_ACCESS_KEY_VALUE_PATTERN})(?!_)/g`;
 const TELEGRAM_BOT_TOKEN_REDACT_PATTERN = String.raw`\bbot(\d{6,}:[A-Za-z0-9_-]{20,})\b`;
 const TELEGRAM_TOKEN_REDACT_PATTERN = String.raw`\b(\d{6,}:[A-Za-z0-9_-]{20,})\b`;
-const CREDENTIAL_STYLE_HEADER_KEYS = "x-goog-api-key|api-key|apikey|x-api-token|x-access-token";
-const GATEWAY_SECURITY_HEADER_KEYS =
+export const CREDENTIAL_STYLE_HEADER_KEYS =
+  "x-goog-api-key|api-key|apikey|x-api-token|x-access-token";
+export const GATEWAY_SECURITY_HEADER_KEYS =
   "X-OpenClaw-Token|x-pomerium-jwt-assertion|X-Api-Key|X-Auth-Token";
 // Colons identify HTTP headers. Equals assignments may be form bodies, so stop only before an
 // actual following `&key=` pair; otherwise opaque credential punctuation stays fully masked.
@@ -125,6 +126,17 @@ export const CHUNK_UNSAFE_PATTERN_SOURCES = new Set([
   STANDALONE_BEARER_REDACT_PATTERN,
   AWS_SECRET_ACCESS_KEY_VALUE_REDACT_PATTERN,
   ...HTTP_AUTH_HEADER_REDACT_PATTERNS,
+  GATEWAY_SECURITY_COLON_HEADER_REDACT_PATTERN,
+  GATEWAY_SECURITY_EQUALS_ASSIGNMENT_REDACT_PATTERN,
+]);
+
+export const SOURCE_HEADER_PATTERN_SOURCES = new Set([
+  AUTHORIZATION_BEARER_REDACT_PATTERN,
+  AUTHORIZATION_BASIC_REDACT_PATTERN,
+  AUTHORIZATION_BOT_REDACT_PATTERN,
+  ...HTTP_AUTH_HEADER_REDACT_PATTERNS,
+  GATEWAY_SECURITY_COLON_HEADER_REDACT_PATTERN,
+  GATEWAY_SECURITY_EQUALS_ASSIGNMENT_REDACT_PATTERN,
 ]);
 
 export const DEFAULT_REDACT_PATTERNS: readonly string[] = [

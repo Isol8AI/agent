@@ -1412,6 +1412,11 @@ async function requestGracefulChromeClose(
         ) {
           return;
         }
+        const { snapshotSessionStateViaSend } = await import("./session-state-launch.js");
+        await snapshotSessionStateViaSend(send);
+        if (ownsCurrentProcess && !ownsCurrentProcess()) {
+          return;
+        }
         commandSent = true;
         await send("Browser.close");
       },

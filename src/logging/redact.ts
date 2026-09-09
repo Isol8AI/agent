@@ -30,6 +30,7 @@ import {
   PAYMENT_CREDENTIAL_JSON_KEYS,
   PAYMENT_CREDENTIAL_QUERY_KEYS,
   SHELL_REFERENCE_PRESERVING_PATTERN_SOURCES,
+  SOURCE_HEADER_PATTERN_SOURCES,
   TOOL_PAYLOAD_AMBIGUOUS_ASSIGNMENT_PATTERNS,
   TOOL_PAYLOAD_REDACT_PATTERNS,
 } from "./redact-patterns.js";
@@ -49,6 +50,11 @@ const shellReferencePreservingPatterns = new WeakSet<RegExp>();
 const chunkUnsafePatterns = new WeakSet<RegExp>();
 const formAwareEqualsAssignmentPatterns = new WeakSet<RegExp>();
 const sourceAssignmentPatterns = new WeakSet<RegExp>();
+const sourceHeaderPatterns = new WeakSet<RegExp>();
+export type SourceHeaderPolicy = {
+  mask: (text: string) => string;
+  preserves: (text: string, offset: number, length: number) => boolean;
+};
 let defaultResolvedPatterns: RegExp[] | undefined;
 let toolPayloadResolvedPatterns: RegExp[] | undefined;
 
@@ -186,6 +192,9 @@ function parsePattern(raw: RedactPattern): RegExp | null {
       CHUNK_UNSAFE_PATTERN_SOURCES.has(raw))
   ) {
     chunkUnsafePatterns.add(pattern);
+  }
+  if (pattern && typeof raw === "string" && SOURCE_HEADER_PATTERN_SOURCES.has(raw)) {
+    sourceHeaderPatterns.add(pattern);
   }
   return pattern;
 }
@@ -680,12 +689,23 @@ function redactMatch(
   { match, groups, input, offset }: RedactMatch,
   pattern: RegExp,
   preserveSourceAssignment?: (text: string, offset: number) => boolean,
+  sourceHeaders?: SourceHeaderPolicy,
 ): string {
   if (match.includes("PRIVATE KEY-----")) {
     return redactPemBlock(match, "…redacted…");
   }
   const selected = selectSecretCapture(match, groups);
   const token = selected.value;
+  if (
+    sourceHeaderPatterns.has(pattern) &&
+    sourceHeaders?.preserves(
+      input,
+      offset + getSecretCaptureStart(pattern, input, match, offset, selected),
+      token.length,
+    )
+  ) {
+    return match;
+  }
   if (
     sourceAssignmentPatterns.has(pattern) &&
     preserveSourceAssignment?.(
@@ -742,6 +762,7 @@ function redactText(
     redactFormBodies?: boolean;
     redactStructuredAuthHeaders?: boolean;
     preserveSourceAssignment?: (text: string, offset: number) => boolean;
+    sourceHeaders?: SourceHeaderPolicy;
   },
 ): string {
   let next = text;
@@ -753,8 +774,14 @@ function redactText(
     next = redactFormBody(next);
   }
   for (const pattern of patterns) {
+    next = options?.sourceHeaders?.mask(next) ?? next;
     const replacer = (...args: unknown[]) =>
-      redactMatch(readRedactMatch(args), pattern, options?.preserveSourceAssignment);
+      redactMatch(
+        readRedactMatch(args),
+        pattern,
+        options?.preserveSourceAssignment,
+        options?.sourceHeaders,
+      );
     next =
       options?.fullContext || chunkUnsafePatterns.has(pattern)
         ? next.replace(pattern, replacer)
@@ -971,6 +998,7 @@ export function redactInputTextWithSourcePolicy(
   text: string,
   loggingConfig: LoggingConfig | undefined,
   preserveSourceAssignment: (text: string, offset: number) => boolean,
+  sourceHeaders?: SourceHeaderPolicy,
 ): string {
   // Custom patterns run without syntax exemptions, even when identical to a built-in pattern.
   const customPatterns = loggingConfig?.redactPatterns;
@@ -982,6 +1010,7 @@ export function redactInputTextWithSourcePolicy(
     redactFormBodies: true,
     redactStructuredAuthHeaders: true,
     preserveSourceAssignment,
+    sourceHeaders,
   });
 }
 

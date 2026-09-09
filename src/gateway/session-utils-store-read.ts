@@ -8,6 +8,13 @@ import {
   type SessionEntryListScope,
 } from "../config/sessions/session-accessor.js";
 
+export class SessionLookupUnavailableError extends Error {
+  constructor(cause: unknown) {
+    super("Session store is unavailable", { cause });
+    this.name = "SessionLookupUnavailableError";
+  }
+}
+
 /**
  * Request-scoped store reuse.
  *
@@ -54,10 +61,12 @@ export function loadGatewaySessionStoreReads(reads: readonly GatewaySessionStore
   );
   for (const [index, read] of pending.entries()) {
     const result = expectDefined(results[index], "exact batch lookup result");
-    // Preserve the existing per-logical-target unreadable-store behavior.
-    read.store = result.ok
-      ? Object.fromEntries(result.value.map(({ sessionKey, entry }) => [sessionKey, entry]))
-      : {};
+    if (!result.ok) {
+      throw new SessionLookupUnavailableError(result.error);
+    }
+    read.store = Object.fromEntries(
+      result.value.map(({ sessionKey, entry }) => [sessionKey, entry]),
+    );
   }
 }
 
@@ -122,7 +131,7 @@ function loadGatewaySessionLookupStoreUncached(
         storePath,
       }).map(({ sessionKey, entry }) => [sessionKey, entry]),
     );
-  } catch {
-    return {};
+  } catch (error) {
+    throw new SessionLookupUnavailableError(error);
   }
 }

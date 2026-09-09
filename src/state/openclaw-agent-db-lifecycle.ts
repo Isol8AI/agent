@@ -141,13 +141,9 @@ export function retainAgentDatabase(db: DatabaseSync): () => void {
   };
 }
 
-export function closeCachedOpenClawAgentDatabase(
-  database: OpenClawAgentDatabase,
-  options: { eviction?: boolean } = {},
-): void {
-  // Eviction must stay cheap: PASSIVE skips waiting on concurrent readers,
-  // whose drained TRUNCATE checkpoints blocked the event loop for seconds.
-  database.walMaintenance.close(options.eviction ? { checkpointMode: "PASSIVE" } : undefined);
+export function closeCachedOpenClawAgentDatabase(database: OpenClawAgentDatabase): void {
+  // Replication readers may remain attached at every close, not only eviction.
+  database.walMaintenance.close({ checkpointMode: "PASSIVE" });
   if (database.db.isOpen) {
     database.db.close();
   }
@@ -178,7 +174,7 @@ export function evictLruAgentDatabaseHandles(): void {
       }
       // Registry rows are durable discovery metadata; only explicit disposal
       // unregisters them, while eviction closes this process-local handle.
-      closeCachedOpenClawAgentDatabase(database, { eviction: true });
+      closeCachedOpenClawAgentDatabase(database);
       cache.databases.delete(pathname);
       cache.failures.delete(pathname);
       if (cache.incognito.has(database)) {
@@ -258,7 +254,7 @@ export function settleOpenClawAgentDatabaseWorkerClose(
   const database = cache.databases.get(resolvedPath);
   if (database) {
     try {
-      database.walMaintenance.close();
+      database.walMaintenance.close({ checkpointMode: "PASSIVE" });
     } catch (error) {
       errors.push(error instanceof Error ? error : new Error(String(error)));
     }

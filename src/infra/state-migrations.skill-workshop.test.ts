@@ -105,7 +105,14 @@ describe("automatic Skill Workshop migration", () => {
       expect(listed.proposals).toEqual([
         expect.objectContaining({ id: proposal.record.id, status: "pending" }),
       ]);
-      const skillDir = path.join(agentDir, "workshop-skills", "upgrade-procedure");
+      const skillDir = path.join(
+        state.env.OPENCLAW_STATE_DIR!,
+        "skill-workshop",
+        "agents",
+        "main",
+        "skills",
+        "upgrade-procedure",
+      );
       await expect(inspectSkillProposal(proposal.record.id, scope)).resolves.toMatchObject({
         content: proposal.content,
         record: {

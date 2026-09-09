@@ -70,6 +70,8 @@ export type McpServerConfig = {
 export type McpConfig = {
   /** Session runtime idle TTL in milliseconds; unset or zero keeps the runtime alive. */
   sessionIdleTtlMs?: number;
+  /** Share static transports within an agent/workspace/config; sessions retain their own lifetime. */
+  runtimeScope?: "session" | "shared";
   /** Named MCP server definitions managed by OpenClaw. */
   servers?: Record<string, McpServerConfig>;
   /** Opt-in MCP Apps rendering and app-to-server bridge. */

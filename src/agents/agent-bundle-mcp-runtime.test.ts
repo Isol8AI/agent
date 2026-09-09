@@ -721,6 +721,97 @@ afterEach(async () => {
 });
 
 describe("session MCP runtime", () => {
+  it("materializes cold catalogs without waiting and releases the warming lease", async () => {
+    const runtime = makeRuntime([{ toolName: "probe", description: "probe" }]);
+    const catalog = await runtime.getCatalog();
+    const deferred = createDeferred<typeof catalog>();
+    let ready = false;
+    let leases = 0;
+    runtime.getCatalog = async () => {
+      const result = await deferred.promise;
+      ready = true;
+      return result;
+    };
+    runtime.peekCatalog = () => (ready ? catalog : null);
+    runtime.acquireLease = () => {
+      leases++;
+      return () => {
+        leases--;
+      };
+    };
+    const cold = await materializeBundleMcpToolsForRun({ runtime, nonBlocking: true });
+    expect(cold.tools).toEqual([]);
+    expect(leases).toBe(2);
+    await cold.dispose();
+    expect(leases).toBe(1);
+    deferred.resolve(catalog);
+    await vi.waitFor(() => expect(leases).toBe(0));
+    const warm = await materializeBundleMcpToolsForRun({ runtime, nonBlocking: true });
+    expect(warm.tools).toHaveLength(1);
+    await warm.dispose();
+    expect(leases).toBe(0);
+  });
+
+  it("shares only same-agent workspace/config transports while retaining session disposal", async () => {
+    const dir = makeTempDir(tempDirs, "mcp-shared-proof-");
+    const filePath = path.join(dir, "server.mjs");
+    const logPath = path.join(dir, "server.log");
+    await writeListToolsMcpServer({ filePath, logPath });
+    const create = (
+      id: string,
+      agentDir = path.join(dir, "agent-a"),
+      workspaceDir = dir,
+      marker = "one",
+      agentId = "a",
+    ) =>
+      getOrCreateSessionMcpRuntime({
+        sessionId: id,
+        sessionKey: `agent:${agentId}:${id}`,
+        agentDir,
+        workspaceDir,
+        cfg: {
+          mcp: {
+            runtimeScope: "shared",
+            servers: {
+              probe: { command: process.execPath, args: [filePath], env: { MARKER: marker } },
+            },
+          },
+        },
+      });
+    const a = await create("a");
+    const b = await create("b");
+    const others = [
+      await create("c", path.join(dir, "agent-b")),
+      await create("d", undefined, path.join(dir, "other-workspace")),
+      await create("e", undefined, undefined, "two"),
+      await create("f", undefined, undefined, undefined, "b"),
+    ];
+    try {
+      await Promise.all([
+        a.getCatalog(),
+        b.getCatalog(),
+        ...others.map((runtime) => runtime.getCatalog()),
+      ]);
+      const log = await fs.readFile(logPath, "utf8");
+      expect(log.split("recv initialize").length - 1).toBe(5);
+      expect(a.sessionId).toBe("a");
+      expect(b.sessionId).toBe("b");
+      await a.dispose();
+      expect((await a.getCatalog()).tools).toEqual([]);
+      await expect(b.callTool("probe", "slow_tool", {})).resolves.toMatchObject({ isError: false });
+      await b.dispose();
+      const fresh = await create("fresh");
+      try {
+        await fresh.getCatalog();
+      } finally {
+        await fresh.dispose();
+      }
+      expect((await fs.readFile(logPath, "utf8")).split("recv initialize").length - 1).toBe(6);
+    } finally {
+      await Promise.all([a, b, ...others].map((runtime) => runtime.dispose()));
+    }
+  });
+
   it("advertises the stable MCP Apps client extension only when enabled", () => {
     expect(testing.buildMcpClientCapabilities(false)).toEqual({});
     expect(testing.buildMcpClientCapabilities(true)).toEqual({

@@ -199,6 +199,13 @@ export const OpenClawSchemaShape = {
         )
         .optional(),
       extraArgs: z.array(z.string()).optional(),
+      sessionState: z
+        .strictObject({
+          enabled: z.boolean().optional(),
+          intervalSeconds: z.number().int().positive().max(86_400).optional(),
+          path: z.string().optional(),
+        })
+        .optional(),
       tabCleanup: z
         .strictObject({
           enabled: z.boolean().optional(),

@@ -22,6 +22,7 @@ import { resolveProviderEndpoint } from "./provider-attribution.js";
 import type { AgentMessage } from "./runtime/index.js";
 import {
   copyCodeModeSourceAppend,
+  type SourceField,
   readCodeModeSourceFields,
   type CodeModeSourceAppend,
 } from "./transcript-code-mode-source.js";
@@ -493,8 +494,8 @@ function redactTranscriptStructuredValue(
   location: TranscriptValueLocation = "nested",
   assistantRoute?: TranscriptAssistantRoute,
   modelVisibleToolResult = false,
-  sourceFields?: ReadonlyMap<string, string>,
-  sourceSlots?: ReadonlyMap<object, ReadonlyMap<string, string>>,
+  sourceFields?: ReadonlyMap<string, SourceField>,
+  sourceSlots?: ReadonlyMap<object, ReadonlyMap<string, SourceField>>,
 ): unknown {
   if (typeof value === "string") {
     if (fieldKey) {
@@ -681,8 +682,11 @@ function redactTranscriptStructuredValue(
       continue;
     }
     const redacted =
-      typeof item === "string" && sourceFields?.get(key) === item
-        ? redactSourceInputTextWithConfig(item, resolveTranscriptLoggingConfig(cfg))
+      typeof item === "string" && sourceFields?.get(key)?.value === item
+        ? (sourceFields.get(key)?.redact ?? redactSourceInputTextWithConfig)(
+            item,
+            resolveTranscriptLoggingConfig(cfg),
+          )
         : redactTranscriptStructuredValue(
             item,
             cfg,
@@ -753,8 +757,8 @@ export function redactTranscriptMessage(
     undefined,
     readCodeModeSourceFields(message, sourceAppend),
   ) as AgentMessage;
-  copyCodeModeSourceAppend(message, redacted, sourceAppend, (source) =>
-    redactSourceInputTextWithConfig(source, resolveTranscriptLoggingConfig(cfg)),
+  copyCodeModeSourceAppend(message, redacted, sourceAppend, (source, field) =>
+    (field.redact ?? redactSourceInputTextWithConfig)(source, resolveTranscriptLoggingConfig(cfg)),
   );
   return redacted;
 }
