@@ -10474,6 +10474,74 @@ public struct SessionsSendParams: Codable, Sendable {
     }
 }
 
+public struct SessionMessageAppendParams: Codable, Sendable {
+    public let sessionkey: String
+    public let expectedsessionid: String
+    public let idempotencykey: String
+    public let text: String
+    public let replytoid: String?
+    public let mentions: [[String: AnyCodable]]?
+
+    public init(
+        sessionkey: String,
+        expectedsessionid: String,
+        idempotencykey: String,
+        text: String,
+        replytoid: String? = nil,
+        mentions: [[String: AnyCodable]]? = nil)
+    {
+        self.sessionkey = sessionkey
+        self.expectedsessionid = expectedsessionid
+        self.idempotencykey = idempotencykey
+        self.text = text
+        self.replytoid = replytoid
+        self.mentions = mentions
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case expectedsessionid = "expectedSessionId"
+        case idempotencykey = "idempotencyKey"
+        case text
+        case replytoid = "replyToId"
+        case mentions
+    }
+}
+
+public struct SessionMessageAppendResult: Codable, Sendable {
+    public let sessionkey: String
+    public let sessionid: String
+    public let messageid: String
+    public let messageseq: Int
+    public let effectiveparentid: String?
+    public let appended: Bool
+
+    public init(
+        sessionkey: String,
+        sessionid: String,
+        messageid: String,
+        messageseq: Int,
+        effectiveparentid: String? = nil,
+        appended: Bool)
+    {
+        self.sessionkey = sessionkey
+        self.sessionid = sessionid
+        self.messageid = messageid
+        self.messageseq = messageseq
+        self.effectiveparentid = effectiveparentid
+        self.appended = appended
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case sessionid = "sessionId"
+        case messageid = "messageId"
+        case messageseq = "messageSeq"
+        case effectiveparentid = "effectiveParentId"
+        case appended
+    }
+}
+
 public struct SessionsMessagesSubscribeParams: Codable, Sendable {
     public let key: String
     public let agentid: String?

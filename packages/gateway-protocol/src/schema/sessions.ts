@@ -482,7 +482,6 @@ export const SessionsCreateResultSchema = Type.Object(
   { additionalProperties: true },
 );
 
-/** Persists one authenticated contribution without starting execution. */
 export const SessionMessageAppendParamsSchema = closedObject({
   sessionKey: NonEmptyString,
   expectedSessionId: NonEmptyString,
@@ -509,7 +508,6 @@ export const SessionMessageAppendResultSchema = closedObject({
   appended: Type.Boolean(),
 });
 
-/** Sends one message into an existing session and starts execution. */
 export const SessionsSendParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),
