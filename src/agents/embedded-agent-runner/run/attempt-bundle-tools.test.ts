@@ -112,7 +112,7 @@ describe("prepareEmbeddedAttemptBundleTools", () => {
         toolSearchControlsEnabledForRun: false,
       });
       const deferred = createDeferred<McpToolCatalog>();
-      const entered = createDeferred<void>();
+      const entered = createDeferred();
       const callTool = vi.fn(async () => ({
         content: [{ type: "text" as const, text: "allowed-cold" }],
       }));
